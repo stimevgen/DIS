@@ -1,0 +1,179 @@
+var Timers  = new Ext.util.TaskRunner();
+var ThisWin = App.Window.getWinById("%ContainerId%");
+if (!ThisWin){
+	Ext.Msg.alert({
+		title:'Ошибка окна!!!',
+		msg: 'Не найдено окно "%ContainerId%" для отображения контента.',
+		icon: Ext.MessageBox.WARNING,
+		buttons: Ext.Msg.OK,
+		modal: true,
+	});
+	return;
+}
+// Защитный Timer не активности окна
+var timerContentTimeOut = Timers.newTask({
+	run: function () {
+		Ext.Msg.alert({
+			title:'Ошибка окна!',
+			msg: 'Окно "'+ThisWin.name+' ['+ThisWin.id+']" не отвечает.',
+			icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+			buttons: Ext.Msg.OK,
+			modal: true,
+			fn: function(btn) {
+				if (ThisWin) {ThisWin.close();}
+				timerContentTimeOut.destroy();
+			}
+		});
+	},
+	interval: 5000
+});
+timerContentTimeOut.start();
+ThisWin.Elements = {};
+ThisWin.Public   = {};
+//============================================================================================================================
+var Store 	= App.Designer.SessionStore;
+
+var Columns = [
+	{
+		text: 'Id',
+		dataIndex: 'id',
+		hidden: true
+	},{
+		text: 'SSID',
+		dataIndex: 'guid',
+		flex: 1,
+		renderer: function(value){
+			return '<img src="images/ico/16/session_idle_time.png"></img> '+value;
+		},
+	},{
+		text: 'Update',
+		dataIndex: 'updatedAt',
+		width: 150,
+		renderer: Ext.util.Format.dateRenderer('d.m.Y H:i:s'),
+	},{
+		text: 'Create',
+		dataIndex: 'createdAt',
+		width: 150,
+		renderer: Ext.util.Format.dateRenderer('d.m.Y H:i:s'),
+	}
+];
+
+var Features = [Ext.create('Ext.grid.feature.Grouping', {
+	groupHeaderTpl: Ext.create('Ext.XTemplate',
+		'<img src="images/ico/user16.png"></img> {name:this.formatName} ({rows.length})',
+		{
+			formatName: function(guid) {
+				var system = App.Designer.UserStore.findRecord('guid', guid);
+				if (system) {
+					return system.data.name;
+				} else {
+					return '<font style="color:#808080"><i>{...}</i></font>';
+				}
+			}
+		}
+	)
+})];
+
+
+/* btnDelete on click */
+function onGridDelete ( obj, e, eOpts ) {
+	var store   = Grid.getStore(),
+	    record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		var msg = Ext.MessageBox.show({
+			title:'Удаление',
+            buttons: Ext.MessageBox.YESNO,
+            icon: Ext.MessageBox.QUESTION,
+            msg: 'Удалить запись "'+record.data.guid+'"?',
+            fn: function(btn) {
+                if (btn == 'yes') {
+				store.remove(record);
+				store.sync({
+					success: function(batch, options){
+						console.log('DeleteRecord success', batch, options);
+					},
+					failure: function(batch, options){
+						//store.add(store.getRemovedRecords());
+						store.rejectChanges();
+						console.log('DeleteRecord failure', batch, options);
+					},  				
+				});
+				store.load();
+			}
+		},});
+		msg.alignTo(ThisWin, 'c-c'); //По центру окна
+	}
+}
+
+/* Grid on cellkeydown */
+function onGridKeyDown ( obj, td, cellIndex, record, tr, rowIndex, e, eOpts ){
+	if (e.keyCode === 46) {onGridDelete();}
+}
+
+/* Grid on selectionchange */
+function onGridSelectionChange ( obj, selected, eOpts ) {
+	btnDelete.setDisabled(selected.length === 0);
+}
+
+//============================================================================================================================
+
+/* ELEMENT btnDelete */
+var btnDelete = ThisWin.Elements.btnDelete = Ext.create('Ext.button.Button', {	
+	disabled: true,
+	icon: 'images/ico/delete16.png',
+	items:[],
+	listeners: {	
+		click: onGridDelete,
+	}
+});
+
+/* ELEMENT tbMain */
+var tbMain = ThisWin.Elements.tbMain = Ext.create('Ext.toolbar.Toolbar', {	
+	items:[btnDelete,],
+	listeners: {	
+	}
+});
+
+/* ELEMENT GridPaging */
+var GridPaging = ThisWin.Elements.GridPaging = Ext.create('Ext.toolbar.Paging', {	
+	displayInfo: true,
+	//displayMsg: 'Показано  {0} - {1} из {2}',
+	store: Store,
+	items:[],
+	listeners: {	
+	}
+});
+
+/* ELEMENT Grid */
+var Grid = ThisWin.Elements.Grid = Ext.create('Ext.grid.Panel', {	
+	bbar: GridPaging,
+	border: false,
+	columns: Columns,
+	features: Features,
+	store: Store,
+	listeners: {	
+		cellkeydown: onGridKeyDown,
+		selectionchange: onGridSelectionChange,
+	}
+});
+
+/* ELEMENT MainPanel */
+var MainPanel = ThisWin.Elements.MainPanel = Ext.create('Ext.panel.Panel', {	
+	border: false,
+	layout: 'fit',
+	tbar: tbMain,
+	items:[Grid,],
+	listeners: {	
+	}
+});
+
+
+ThisWin.setIcon('images/ico/table16.png');
+ThisWin.setTitle('Система: Сессии');
+if (ThisWin.height < 200) {ThisWin.height = 200;}
+if (ThisWin.width < 350) {ThisWin.width = 350;}
+ThisWin.add(MainPanel);
+//============================================================================================================================
+timerContentTimeOut.destroy();
+if (typeof(onWindowCreate)==='function') {onWindowCreate(ThisWin);}
+ThisWin.doLayout();

@@ -1,0 +1,240 @@
+var ThisWin = App.Window.getWinById("%ContainerId%");	
+if (!ThisWin){
+	Ext.Msg.alert({
+		title:'Ошибка окна!',
+		msg: 'Не найдено окно "%ContainerId%" для отображения контента.',
+		icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+		buttons: Ext.Msg.OK,
+		modal: true,
+	});
+	return;
+}
+
+var Timers = new Ext.util.TaskRunner();
+// Защитный Timer не активности окна
+var timerContentTimeOut = Timers.newTask({
+	run: function () {
+		Ext.Msg.alert({
+			title:'Ошибка окна!',
+			msg: 'Окно "'+ThisWin.name+' ['+ThisWin.id+']" не отвечает.',
+			icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+			buttons: Ext.Msg.OK,
+			modal: true,
+			fn: function(btn) {
+				if (ThisWin) {ThisWin.close();}
+				timerContentTimeOut.destroy();
+			}
+		});
+	},
+	interval: 5000
+});
+timerContentTimeOut.start();
+
+ThisWin.Elements = {};
+ThisWin.Public   = {};
+//============================================================================================================================
+//============================================================================================================================
+//                               #######  #     #  #######  #    #  #######   ######   
+//                               #        #     #  #        ##   #     #     #         
+//                               ####      #   #   ####     # #  #     #      #####    
+//                               #          # #    #        #  # #     #           #   
+//                               #######     #     #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+function onWinCreate(obj) {
+	if (obj.height < 200) {obj.height = 200;}
+	if (obj.width  < 300) {obj.width  = 300;}
+	
+	if (typeof(obj.parent) !== 'undefined'){
+		var rec = obj.conf.dataParent.record.data;
+		obj.setIcon(obj.conf.dataParent.icon);		
+		SetWinTitle(rec.name, obj.conf.dataParent.action);
+		onLoad(rec, obj.conf.dataParent.action);
+		onDataModifed(false);
+	} else {
+		Ext.Msg.alert('Error', 'Window not parent.');
+	}
+}
+
+function SetWinTitle(name, action){
+	ThisWin.Title = '"'+name+'": '+ThisWin.conf.dataParent.title+' ('+action+')';
+	onDataModifed(ThisWin.Modifed);
+}
+
+function onDataModifed(status){
+	ThisWin.Modifed = status;
+	var ModStr = ThisWin.Modifed ? ' *' : '';
+	ThisWin.setTitle(ThisWin.Title+ModStr);
+	setAccess();
+}
+
+
+//===================================================================================	
+//----------------------------- MAIN TOOLBAR ----------------------------------------
+function onLoad( data, action ) {
+	try {
+		editRo.setValue(data.ro);
+		editName.setValue(data.name);
+		editTitle.setValue(data.title);
+		setAccess();
+	} catch (err) {
+		Ext.Msg.alert('Error', 'Error load data "'+data.name+'".\n'+err.message);
+	}
+}
+
+function onSave(close) {
+	if (formOptions.isValid()) {
+		var newdata = {
+			name:	editName.getValue(),
+			title:	editTitle.getValue(),
+			ro:		editRo.getValue()
+		};
+		if (typeof ThisWin.parent !== 'undefined'){
+			
+			if ((ThisWin.conf.dataParent.action === 'add') 
+			  ||(ThisWin.conf.dataParent.action === 'copy')) {
+				ThisWin.conf.dataParent.recordFn(newdata,
+					function(){
+						onDataModifed(false);
+						if (close){ThisWin.close();}
+					}
+				);
+			}
+			
+			if (ThisWin.conf.dataParent.action === 'edit') {
+				ThisWin.conf.dataParent.record.set(newdata);
+				ThisWin.conf.dataParent.recordFn(ThisWin.conf.dataParent.record,
+					function(){
+						onDataModifed(false);
+						if (close){ThisWin.close();}
+					}
+				);
+			}	
+		}
+	}	
+}
+
+
+function setAccess() {		
+	var ro = editRo.getValue();
+	editName.setDisabled(ro);
+	editTitle.setDisabled(ro);
+}
+
+function onBeforeClose () {
+	if (ThisWin.CLOSING) {return true;}
+	if (ThisWin.Modifed){
+		var msg = Ext.MessageBox.show({
+			title:'Сохранение',
+			buttons: Ext.MessageBox.YESNO,
+			icon: Ext.MessageBox.QUESTION,
+			msg: 'Данные были изменены, сохранить изменения?',
+			fn: function(btn) {
+				if (btn == 'yes') {
+					onSave(true);
+				} else {
+					ThisWin.CLOSING = true;
+					ThisWin.close();
+				}
+		},});
+		msg.alignTo(ThisWin, 'c-c'); //По центру окна
+		return false;
+	}
+}
+//============================================================================================================================
+//============================================================================================================================
+//             #     #  #  #    #        #######  #        #######  #     #  #######  #    #  #######   ######   
+//             #     #  #  ##   #        #        #        #        ##   ##  #        ##   #     #     #         
+//             #     #  #  # #  #        ####     #        ####     # # # #  ####     # #  #     #      #####    
+//             #  #  #  #  #  # #        #        #        #        #  #  #  #        #  # #     #           #   
+//              ## ##   #  #   ##        #######  #######  #######  #     #  #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+//===================================================================================	
+//------------------------------------- OPTIONS FORM --------------------------------	
+var editRo= ThisWin.Elements.editRo = Ext.create('Ext.form.field.Checkbox', {
+	name: 'ro',
+    fieldLabel: 'Read Only',
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editName = ThisWin.Elements.editName = Ext.create('Ext.form.field.Text', {
+	name: 'name',
+    fieldLabel: 'Name',
+    value: '',
+	allowBlank: false,
+	listeners:{
+		change: function( obj, newValue, oldValue, eOpts){
+			SetWinTitle(newValue, ThisWin.conf.dataParent.action);
+			onDataModifed(true);
+		}
+	}
+});
+
+var editTitle = ThisWin.Elements.editTitle = Ext.create('Ext.form.field.Text', {
+	name: 'title',
+    fieldLabel: 'Title',
+    value: '',
+	allowBlank: false,
+	listeners:{
+		change: function( obj, newValue, oldValue, eOpts){
+			onDataModifed(true);
+		}
+	}
+});
+
+
+
+var formOptions = ThisWin.Elements.formOptions = Ext.create('Ext.form.Panel', {
+    frame: true,
+    border:false,
+	//title: 'Options',
+	//icon: 'images/ico/view16.png',
+	width: 90,
+    bodyPadding: 5,
+    fieldDefaults: {
+        labelAlign: 'left',
+        labelWidth: 100,
+        anchor: '100%'
+    },
+    items: [editRo, editName, editTitle],
+});
+
+
+//===================================================================================	
+//----------------------------- MAIN PANEL ------------------------------------------
+var Panel = ThisWin.Elements.Panel = Ext.create('Ext.panel.Panel', {
+	layout: 'fit',
+	border: false,
+	items:[formOptions],
+	buttons: [/*
+	{
+        text: 'Save',
+        handler: function() {
+			onSave(false);
+        }
+    },*/{
+        text: 'OK',
+        handler: function() {
+			onSave(true);
+        }
+    },{
+        text: 'Cancel',
+        handler: function() {
+			ThisWin.close();
+        }
+    }],
+});
+
+ThisWin.add(Panel);	
+ThisWin.on('beforeclose', onBeforeClose);
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+
+timerContentTimeOut.destroy();
+if (typeof(onWinCreate)==='function') {onWinCreate(ThisWin);}
+ThisWin.doLayout();

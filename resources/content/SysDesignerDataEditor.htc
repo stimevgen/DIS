@@ -1,0 +1,295 @@
+var ThisWin = App.Window.getWinById("%ContainerId%");	
+if (!ThisWin){
+	Ext.Msg.alert({
+		title:'Ошибка окна!',
+		msg: 'Не найдено окно "%ContainerId%" для отображения контента.',
+		icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+		buttons: Ext.Msg.OK,
+		modal: true,
+	});
+	return;
+}
+
+var Timers = new Ext.util.TaskRunner();
+// Защитный Timer не активности окна
+var timerContentTimeOut = Timers.newTask({
+	run: function () {
+		Ext.Msg.alert({
+			title:'Ошибка окна!',
+			msg: 'Окно "'+ThisWin.name+' ['+ThisWin.id+']" не отвечает.',
+			icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+			buttons: Ext.Msg.OK,
+			modal: true,
+			fn: function(btn) {
+				if (ThisWin) {ThisWin.close();}
+				timerContentTimeOut.destroy();
+			}
+		});
+	},
+	interval: 5000
+});
+timerContentTimeOut.start();
+
+ThisWin.Elements = {};
+ThisWin.Public   = {};
+//============================================================================================================================
+//============================================================================================================================
+//                               #######  #     #  #######  #    #  #######   ######   
+//                               #        #     #  #        ##   #     #     #         
+//                               ####      #   #   ####     # #  #     #      #####    
+//                               #          # #    #        #  # #     #           #   
+//                               #######     #     #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+function onWinCreate(obj) {
+	if (obj.height < 500) {obj.height = 500;}
+	if (obj.width  < 600) {obj.width  = 600;}
+	
+	if (typeof(obj.parent) !== 'undefined'){
+		var rec = obj.conf.dataParent.record.data;
+		obj.setIcon(obj.conf.dataParent.icon);		
+		SetWinTitle(rec.name, obj.conf.dataParent.action);
+		onLoad(rec, obj.conf.dataParent.action);
+		onDataModifed(false);
+	} else {
+		Ext.Msg.alert('Error', 'Window not parent.');
+	}
+}
+
+function SetWinTitle(name, action){
+	ThisWin.Title = '"'+name+'": '+ThisWin.conf.dataParent.title+' ('+action+')';
+	onDataModifed(ThisWin.Modifed);
+}
+
+function onDataModifed(status){
+	ThisWin.Modifed = status;
+	var ModStr = ThisWin.Modifed ? ' *' : '';
+	ThisWin.setTitle(ThisWin.Title+ModStr);
+	setAccess();
+}
+
+
+//===================================================================================	
+//----------------------------- MAIN TOOLBAR ----------------------------------------
+function onLoad( data, action ) {
+	try {
+		editRo.setValue(data.ro);
+		editSystem.setValue(data.system_guid);
+		editName.setValue(data.name);
+		editValue.setValue(App.Util.Utf8.decode(App.Util.base64.decode(data.data)));
+		setAccess();
+	} catch (err) {
+		Ext.Msg.alert('Error', 'Error load data "'+data.name+'".\n'+err.message);
+	}
+}
+
+function onSave(close) {
+	if (formOptions.isValid()) {
+		var newdata = {
+			name:   	 editName.getValue(),
+			system_guid: editSystem.getValue(),
+			ro:			 editRo.getValue(),
+			data:		 App.Util.base64.encode(App.Util.Utf8.encode(editValue.getValue())),
+		};
+		if (typeof ThisWin.parent !== 'undefined'){
+			
+			if ((ThisWin.conf.dataParent.action === 'add') 
+			  ||(ThisWin.conf.dataParent.action === 'copy')) {
+				ThisWin.conf.dataParent.recordFn(newdata,
+					function(){
+						onDataModifed(false);
+						if (close){ThisWin.close();}
+					}
+				);
+			}
+			
+			if (ThisWin.conf.dataParent.action === 'edit') {
+				ThisWin.conf.dataParent.record.set(newdata);
+				ThisWin.conf.dataParent.recordFn(ThisWin.conf.dataParent.record,
+					function(){
+						onDataModifed(false);
+						if (close){ThisWin.close();}
+					}
+				);
+			}	
+		}
+	}	
+}
+
+
+function setAccess() {		
+	var ro = editRo.getValue();
+	editName.setDisabled(ro);
+	editSystem.setDisabled(ro);
+	editValue.setDisabled(ro);
+}
+
+function onBeforeClose () {
+	if (ThisWin.CLOSING) {return true;}
+	if (ThisWin.Modifed){
+		var msg = Ext.MessageBox.show({
+			title:'Сохранение',
+			buttons: Ext.MessageBox.YESNO,
+			icon: Ext.MessageBox.QUESTION,
+			msg: 'Данные были изменены, сохранить изменения?',
+			fn: function(btn) {
+				if (btn == 'yes') {
+					onSave(true);
+				} else {
+					ThisWin.CLOSING = true;
+					ThisWin.close();
+				}
+		},});
+		msg.alignTo(ThisWin, 'c-c'); //По центру окна
+		return false;
+	}
+}
+//============================================================================================================================
+//============================================================================================================================
+//             #     #  #  #    #        #######  #        #######  #     #  #######  #    #  #######   ######   
+//             #     #  #  ##   #        #        #        #        ##   ##  #        ##   #     #     #         
+//             #     #  #  # #  #        ####     #        ####     # # # #  ####     # #  #     #      #####    
+//             #  #  #  #  #  # #        #        #        #        #  #  #  #        #  # #     #           #   
+//              ## ##   #  #   ##        #######  #######  #######  #     #  #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+//===================================================================================	
+//------------------------------------- OPTIONS FORM --------------------------------	
+var editRo= ThisWin.Elements.editRo = Ext.create('Ext.form.field.Checkbox', {
+	name: 'ro',
+    fieldLabel: 'Read Only',
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editSystem = ThisWin.Elements.editSystem = Ext.create('Ext.form.ComboBox', {
+    name: 'label',
+	fieldLabel: 'System',
+    store: App.Designer.SystemStore,
+	editable: false,
+	//queryMode: 'remote',
+    displayField: 'title',
+    valueField: 'guid',
+	allowBlank: false,
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editName = ThisWin.Elements.editName = Ext.create('Ext.form.field.Text', {
+	name: 'name',
+    fieldLabel: 'Name',
+    value: '',
+	allowBlank: false,
+	listeners:{
+		change: function( obj, newValue, oldValue, eOpts){
+			SetWinTitle(newValue, ThisWin.conf.dataParent.action);
+			onDataModifed(true);
+		}
+	}
+});
+
+
+
+var formOptions = ThisWin.Elements.formOptions = Ext.create('Ext.form.Panel', {
+    frame: true,
+    border:false,
+	//title: 'Options',
+	//icon: 'images/ico/view16.png',
+	width: 90,
+    bodyPadding: 5,
+    fieldDefaults: {
+        labelAlign: 'left',
+        labelWidth: 100,
+        anchor: '100%'
+    },
+    items: [editRo, editSystem, editName],
+});
+
+var PanelOptions = ThisWin.Elements.PanelOptions = Ext.create('Ext.panel.Panel', {
+    //title: 'Options',
+	//icon: 'images/ico/view16.png',
+	layout: 'fit',
+	anchor:'100%',
+	height: 100,
+	border: false,
+	items: [formOptions],	
+});
+
+
+
+
+var editValue = ThisWin.Elements.editValue = Ext.create('App.components.aceeditor.WithToolbar', {
+    //theme: 'eclipse',
+    parser: 'javascript',
+    printMargin: true,
+});
+	
+var PanelCode = ThisWin.Elements.PanelCode = Ext.create('Ext.panel.Panel', {
+    icon: 'images/ico/script16.png',
+	title: 'Value',
+	border: false,
+	layout: 'fit',
+	anchor:'100% -100',
+	items: [editValue],	
+});
+
+
+
+//===================================================================================	
+//----------------------------------- TABS ------------------------------------------
+var Panels = ThisWin.Elements.Panels = Ext.create('Ext.panel.Panel', {
+	//activeTab: 0,
+	//border: false,
+	layout: 'anchor',
+    items: [
+		PanelOptions,
+		PanelCode,
+    ],
+});
+
+
+
+//===================================================================================	
+//----------------------------- MAIN PANEL ------------------------------------------
+var Panel = ThisWin.Elements.Panel = Ext.create('Ext.panel.Panel', {
+	layout: 'fit',
+	border: false,
+	items:[Panels],
+	buttons: [/*
+	{
+        text: 'Save',
+        handler: function() {
+			onSave(false);
+        }
+    },*/{
+        text: 'OK',
+        handler: function() {
+			onSave(true);
+        }
+    },{
+        text: 'Cancel',
+        handler: function() {
+			ThisWin.close();
+        }
+    }],
+});
+
+ThisWin.add(Panel);	
+ThisWin.on('beforeclose', onBeforeClose);
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================	
+	
+timerContentTimeOut.destroy();
+if (typeof(onWinCreate)==='function') {onWinCreate(ThisWin);}
+ThisWin.doLayout();

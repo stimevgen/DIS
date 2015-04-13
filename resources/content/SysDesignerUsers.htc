@@ -1,0 +1,291 @@
+var Timers  = new Ext.util.TaskRunner();
+var ThisWin = App.Window.getWinById("%ContainerId%");
+if (!ThisWin){
+	Ext.Msg.alert({
+		title:'Ошибка окна!!!',
+		msg: 'Не найдено окно "%ContainerId%" для отображения контента.',
+		icon: Ext.MessageBox.WARNING,
+		buttons: Ext.Msg.OK,
+		modal: true,
+	});
+	return;
+}
+ThisWin.Elements = {};
+ThisWin.Public   = {};
+//============================================================================================================================
+var EditWindow = 'SysDesignerSystemEditor';
+
+var Store 	= App.Designer.SystemStore;
+
+var Columns = [
+	{
+		text: 'Id',
+		dataIndex: 'id',
+		hidden: true
+	},{
+		text: 'GUID',
+		dataIndex: 'guid',
+		hidden: true
+	},{ text: '', 		dataIndex: 'ro',   width: 30,
+		renderer: function(value, metaData, record) {
+			return  value ? '<img src="images/ico/16/lock.png"></img>' : '<img src="images/ico/workflow16.png"></img>';
+		}
+	},{
+		text: 'Name',
+		dataIndex: 'name',
+		flex: 1,
+	},{
+		text: 'Title',
+		dataIndex: 'title',
+		flex: 1,
+	},{
+		text: 'CreatedAt',
+		dataIndex: 'createdAt',
+		hidden: true
+	},{
+		text: 'UpdatedAt',
+		dataIndex: 'updatedAt',
+		hidden: true
+	}
+];
+
+
+/* WindowList on Create */
+function WindowList_Create () {
+
+}
+
+
+/* Запуск окна редактирования записи */
+function runEditWindow(senddata){
+	App.Window.LoadServerWin(EditWindow, EditWindow+'_'+senddata.record.data.id, ThisWin, {
+		dataParent: senddata,
+		modal: false,
+	});
+}
+
+/* btnAdd on click */
+function onGridAdd ( obj, e, eOpts ) {
+	runEditWindow({
+		icon: 		'images/ico/workflow16.png',
+		title: 		'Система',
+		action: 	'add',
+		record: 	new Store.model({name:'New'}),
+		recordFn:	RecordAdd,
+	});
+}
+
+/* btnCopy on click */
+function onGridCopy ( obj, e, eOpts ) {
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		runEditWindow({
+			icon:		'images/ico/workflow16.png',
+			title:		'Система',
+			action:		'copy',
+			record:		record,
+			recordFn:	RecordAdd,
+		});
+	}
+}
+
+/* btnEdit on click */
+function onGridEdit ( obj, e, eOpts ) {
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		runEditWindow({
+			icon:		'images/ico/workflow16.png',
+			title:		'Система',
+			action:		'edit',
+			record:		record,
+			recordFn:	RecordEdit,
+		});
+	}
+}
+
+/* btnDelete on click */
+function onGridDelete ( obj, e, eOpts ) {
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		var msg = Ext.MessageBox.show({
+			title:'Удаление',
+			buttons: Ext.MessageBox.YESNO,
+			icon: Ext.MessageBox.QUESTION,
+			msg: 'Удалить запись "'+record.data.name+'"?',
+			fn: function(btn) {
+				if (btn == 'yes') {RecordDelete(record);}
+			},
+		});
+		msg.alignTo(ThisWin, 'c-c');
+	}
+}
+
+/* Grid on cellkeydown */
+function onGridKeyDown ( obj, td, cellIndex, record, tr, rowIndex, e, eOpts ){
+	if (e.keyCode === 45) {onGridAdd();}
+	if (e.keyCode === 13) {onGridEdit();}
+	if (e.keyCode === 46) {if (!roSelectRecord()) {onGridDelete();}}
+}
+
+function roSelectRecord(){
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		return record.data.ro;
+	} else {
+		return true;
+	}
+}
+
+/* Grid on selectionchange */
+function onGridSelectionChange ( obj, selected, eOpts ) {
+	btnCopy.setDisabled(selected.length === 0);
+	btnEdit.setDisabled(selected.length === 0);
+	btnDelete.setDisabled(selected.length === 0 || roSelectRecord());
+}
+
+/* Error Message */
+function ErrorMessage ( message ) {
+	Ext.MessageBox.show({
+		title:'Ошибка',
+        buttons: Ext.MessageBox.OK,
+        icon: Ext.MessageBox.ERROR,
+        msg: message,
+    }).alignTo(ThisWin, 'c-c'); //По центру окна	
+}
+
+/* ADD */
+function RecordAdd(record, ok, err){
+	Store.add(new Store.model(record));
+	Store.sync({
+		success: function(batch, options){
+			Store.load();
+			if (typeof ok === 'function') {ok(batch, options);}
+		},
+		failure: function(batch, options){
+			Store.rejectChanges();
+			if (typeof err === 'function') {err(batch, options);}
+		},  				
+	});	
+}
+
+/* EDIT */
+function RecordEdit(record, ok, err){
+	record.save({
+		success: function(batch, options){
+			Store.load();
+			if (typeof ok === 'function') {ok(batch, options);}
+		},
+		failure: function(batch, options){
+			Store.rejectChanges();
+			if (typeof err === 'function') {err(batch, options);}			
+		},
+	});	
+}
+
+/* DELETE */
+function RecordDelete(record, ok, err){
+	Store.remove(record);
+	Store.sync({
+		success: function(batch, options){
+			Store.load();
+			if (typeof ok === 'function') {ok(batch, options);}
+		},
+		failure: function(batch, options){
+			Store.add(Store.getRemovedRecords());
+			Store.rejectChanges();
+			if (typeof err === 'function') {err(batch, options);}
+		},  				
+	});	
+}
+//============================================================================================================================
+
+/* ELEMENT btnAdd */
+var btnAdd = ThisWin.Elements.btnAdd = Ext.create('Ext.button.Button', {	
+	disabled: false,
+	icon: 'images/ico/add16.png',
+	items:[],
+	listeners: {	
+		click: onGridAdd,
+	}
+});
+
+/* ELEMENT btnCopy */
+var btnCopy = ThisWin.Elements.btnCopy = Ext.create('Ext.button.Button', {	
+	disabled: true,
+	icon: 'images/ico/copy16.png',
+	items:[],
+	listeners: {	
+		click: onGridCopy,
+	}
+});
+
+/* ELEMENT btnEdit */
+var btnEdit = ThisWin.Elements.btnEdit = Ext.create('Ext.button.Button', {	
+	disabled: true,
+	icon: 'images/ico/edit16.png',
+	items:[],
+	listeners: {	
+		click: onGridEdit,
+	}
+});
+
+/* ELEMENT btnDelete */
+var btnDelete = ThisWin.Elements.btnDelete = Ext.create('Ext.button.Button', {	
+	disabled: true,
+	icon: 'images/ico/delete16.png',
+	items:[],
+	listeners: {	
+		click: onGridDelete,
+	}
+});
+
+/* ELEMENT tbMain */
+var tbMain = ThisWin.Elements.tbMain = Ext.create('Ext.toolbar.Toolbar', {	
+	items:[btnAdd,btnCopy,btnEdit,btnDelete,],
+	listeners: {	
+	}
+});
+
+/* ELEMENT GridPaging */
+var GridPaging = ThisWin.Elements.GridPaging = Ext.create('Ext.toolbar.Paging', {	
+	displayInfo: true,
+	displayMsg: 'Показано  {0} - {1} из {2}',
+	store: Store,
+	items:[],
+	listeners: {	
+	}
+});
+
+/* ELEMENT Grid */
+var Grid = ThisWin.Elements.Grid = Ext.create('Ext.grid.Panel', {	
+	bbar: GridPaging,
+	border: false,
+	columns: Columns,
+	store: Store,
+	listeners: {	
+		celldblclick: onGridEdit,
+		cellkeydown: onGridKeyDown,
+		selectionchange: onGridSelectionChange,
+		afterlayout: function(){btnDelete.setDisabled(roSelectRecord());},
+	}
+});
+
+/* ELEMENT MainPanel */
+var MainPanel = ThisWin.Elements.MainPanel = Ext.create('Ext.panel.Panel', {	
+	border: false,
+	layout: 'fit',
+	tbar: tbMain,
+	items:[Grid,],
+	listeners: {	
+	}
+});
+
+
+ThisWin.setIcon('images/ico/workflow16.png');
+ThisWin.setTitle('Система: Системы');
+if (ThisWin.height < 200) {ThisWin.height = 200;}
+if (ThisWin.width < 350) {ThisWin.width = 350;}
+ThisWin.add(MainPanel);
+//============================================================================================================================
+if (typeof(WindowList_Create)==='function') {WindowList_Create(ThisWin);}
+ThisWin.doLayout();

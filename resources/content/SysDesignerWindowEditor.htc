@@ -1,0 +1,1414 @@
+var ThisWin = App.Window.getWinById("%ContainerId%");	
+if (!ThisWin){
+	Ext.Msg.alert({
+		title: 'Ошибка окна!',
+		msg: 'Не найдено окно "%ContainerId%" для отображения контента.',
+		icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+		buttons: Ext.Msg.OK,
+		modal: true,
+	});
+	return;
+}
+
+var Timers = new Ext.util.TaskRunner();
+// Защитный Timer не активности окна
+var timerContentTimeOut = Timers.newTask({
+	run: function () {
+		Ext.Msg.alert({
+			title:'Ошибка окна!',
+			msg: 'Окно "'+ThisWin.name+' ['+ThisWin.id+']" не отвечает.',
+			icon: Ext.MessageBox.WARNING,
+			buttons: Ext.Msg.OK,
+			modal: true,
+			fn: function(btn) {
+				if (ThisWin) {ThisWin.close();}
+				timerContentTimeOut.destroy();
+			}
+		});
+	},
+	interval: 5000
+});
+timerContentTimeOut.start();
+
+ThisWin.Elements = {};
+ThisWin.Public   = {};
+
+//============================================================================================================================
+//============================================================================================================================
+//                               #######  #     #  #######  #    #  #######   ######   
+//                               #        #     #  #        ##   #     #     #         
+//                               ####      #   #   ####     # #  #     #      #####    
+//                               #          # #    #        #  # #     #           #   
+//                               #######     #     #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+/* WINDOW */
+function onWinCreate(obj) {
+	obj.setIcon('images/ico/layout16.png');
+	if (obj.height < 500) {obj.height = 500;}
+	if (obj.width  < 600) {obj.width  = 600;}
+	
+	if (typeof(obj.parent) !== 'undefined'){
+		LoadComponents();
+		var rec = obj.conf.dataParent.record.data;	
+		SetWinTitle(rec.name, obj.conf.dataParent.action);
+		onWindowLoad(rec, obj.conf.dataParent.action);
+		onDataModifed((obj.conf.dataParent.action === 'add'));
+	} else {
+		Ext.Msg.alert('Error', 'Window not parent.');
+	}
+}
+
+function SetWinTitle(name, action){
+	ThisWin.Title = '"'+name+'": Интерфейс ('+action+')';
+	onDataModifed(ThisWin.Modifed);
+}
+
+function SetWinName(name){
+	TreeStoreElements.getRootNode().childNodes[0].set('text',  getLabelElement(name, 'ThisWin'));
+	SetWinTitle(name, ThisWin.conf.dataParent.action);
+}
+
+// Пометка в заголовке формы о модифицированности данных
+function onDataModifed(status){
+	ThisWin.Modifed = status;
+	var ModStr = '';
+	if (ThisWin.Modifed) {ModStr = ' *';}
+	ThisWin.setTitle(ThisWin.Title+ModStr);
+	
+	if (status && CheckPreview.checked){
+		onPreview();
+	}
+	setAccess();
+}
+
+function getLabelElement(element, component){
+	return '<b>'+element+'</b> <i>('+component+')</i>';
+}
+
+// Загрузка компонент из глобальной таблицы в локальный Tree
+function LoadComponents(){
+	TreeStoreComponents.Components = [];
+	var root = TreeStoreComponents.getRootNode();
+	root.removeAll();
+	root.set('allowDrag', false);
+	root.set('allowDrop', false);
+	
+	var comps = StoreComponents.getGroups().items;
+	for(var i in comps) {
+		var chl = [];
+		for(var ii in comps[i].items) {
+			var comp = comps[i].items[ii];
+			chl.push({
+				text: comp.data.name,
+				leaf: true,
+				icon: 'images/components/'+comp.data.name+'.png',
+				allowDrag: true,
+				allowDrop: false, 
+			});
+			TreeStoreComponents.Components.push({
+				name: comp.data.name,
+				config: JSON.parse(comp.data.config),
+			});		
+		}
+		var data = {
+			text: comps[i].config.groupKey,
+			leaf: false,
+			expanded: true,
+			children: chl,
+			allowDrag: false,
+			allowDrop: false, 
+		}	
+		root.appendChild(data);
+	}
+}
+
+function onFilterChange( field, newValue, oldValue, eOpts ){
+	FiltredPE();
+	field.focus();
+}
+
+function FiltredPE(){
+	StoreP.clearFilter();
+	var fP = GridPFilter.getValue();
+	if (fP !== ''){
+		StoreP.filter("name", fP);
+	}
+	
+	StoreE.clearFilter();
+	var fE = GridEFilter.getValue();
+	if (fE !== ''){
+		StoreE.filter("name", fE);
+	}
+}
+
+function GridEActionFn(grid, rowIndex, colIndex) {
+	//debugger;
+	
+	var event = grid.getStore().getAt(rowIndex);
+	var ename  = event.get('name');
+	var evalue = event.get('value');
+	
+	var funcname = evalue;
+	
+	var element = TabTreeElements.getSelectionModel().getSelection()[0];
+	if (element) {
+		var component = TreeStoreComponents.FindComponent(element.data.component);
+		if (component){
+			if (funcname === ''){
+				funcname = (new Ext.XTemplate(component.config.funcname)).apply({name:element.data.name,event:ename});
+			}
+			description = element.data.name+' on '+ename;
+		}
+	}
+	
+	if (funcname !== ''){
+		if (!findFunction(funcname, description)){
+			event.set('value', funcname);
+			event.commit();
+			onSaveTreeElement();
+			onDataModifed(true);
+			findFunction(funcname, description);
+		}
+	}
+	
+}
+
+function findFunction(name, description) {
+	TabsAll.setActiveTab(1);
+	var editor = TextAreaCode.getEditor();
+	var range = editor.find('function '+name+' (');
+	if (range){
+		editor.gotoLine(range.start.row+1);
+		return true;
+	} else {
+		editor.setValue(editor.getValue()+'\n\n/* '+description+' */\nfunction '+name+' () {\n\n}');
+		return false;
+	}
+}
+
+//*******************************************************************************************************************************************************
+
+// Загрузка параметров окна из записи в переменные
+function onWindowLoad(data, action) {
+	try {
+		//debugger;
+		//----------------------
+		//   CLEAR DATA
+		StoreP.removeAll();
+		StoreE.removeAll();
+		
+		editName.setValue('');
+		editTitle.setValue('');
+		editSystem.setValue('');
+		editRo.setValue('');
+
+		TextAreaCode.setValue('');
+		TextAreaRaw.setValue('');
+
+		var nodeRoot    = TreeStoreElements.getRootNode();
+		var nodeThisWin = nodeRoot.childNodes[0];
+		var nodeExtend  = nodeRoot.childNodes[1];
+
+		// ThisWin
+		
+		editName.setValue(data.name);
+		editTitle.setValue(data.title);
+		editSystem.setValue(data.system_guid);
+		editRo.setValue(data.ro);
+		
+		TextAreaRaw.setReadOnly(true);
+		
+		nodeThisWin.set('name',  data.name);
+		nodeThisWin.set('text',  getLabelElement(data.name, 'ThisWin'));
+		nodeThisWin.set('config', {properties:[], events:[]});
+		nodeThisWin.commit();
+
+		TextAreaRaw.setValue(App.Util.Utf8.decode(App.Util.base64.decode(data.data)));
+		
+		var config = JSON.parse(data.config);
+			nodeThisWin.set('config', {properties: config.properties, events:config.events});
+			nodeThisWin.commit();
+			
+			TextAreaCode.setValue(App.Util.Utf8.decode(App.Util.base64.decode(config.code)));
+			
+			appendDataInElements(config.elements);
+			appendDataInElements(config.extend);
+			
+
+			if (config.elements.length){
+				nodeThisWin.appendChild(config.elements);
+			}
+			
+			if (config.extend.length){
+				nodeExtend.appendChild(config.extend);
+			}
+			
+			TabTreeElements.expandAll();
+			
+	} catch (err) {
+		console.log('Error setWindowData', err.message);
+	}
+}
+
+function appendDataInElements(array){
+	for(var i in array) {
+		array[i].text = getLabelElement(array[i].name, array[i].component);
+		array[i].icon = 'images/components/'+array[i].component+'.png';
+		array[i].allowDrop = true;
+		array[i].allowDrag = true;
+		array[i].leaf = false;
+		appendDataInElements(array[i].children);
+	} 
+}
+
+// Получить из элементов объект только с полезными данными
+function getChildren(node){
+	var ret = [];
+	if (node) {
+		for(var i in node.childNodes) {
+			var recNode = node.childNodes[i];
+			ret.push({
+				name: recNode.data.name,
+				component: recNode.data.component,
+				config: recNode.data.config,
+				children: getChildren(recNode),
+			});
+		}
+	} 
+	return ret;
+}
+
+// Формирование данных окна для записи в базу из переменных
+function getWindowData() {
+	var nodeRoot    = TreeStoreElements.getRootNode();
+	var nodeThisWin = nodeRoot.childNodes[0];
+	var nodeExtend  = nodeRoot.childNodes[1];
+	
+	var newdata = {
+		name:        editName.getValue(),
+		title:		 editTitle.getValue(),
+		system_guid: editSystem.getValue(),
+		ro:			 editRo.getValue(),
+		data:		 App.Util.base64.encode(App.Util.Utf8.encode(TextAreaRaw.getValue())),
+	};
+		
+	var config = {
+			elements:   getChildren(nodeThisWin),
+			extend:     getChildren(nodeExtend),
+			properties: nodeThisWin.data.config.properties,
+			events:     nodeThisWin.data.config.events,
+			code:       App.Util.base64.encode(App.Util.Utf8.encode(TextAreaCode.getValue())),
+	}
+	
+	newdata.config = JSON.stringify(config);
+	return newdata;
+}
+
+// Сохранить данные окна в базе из сформированых
+function onWindowSave(close) {
+
+	onCompile(getWindowData());
+	var newdata = getWindowData();
+	
+	if (typeof ThisWin.parent !== 'undefined'){
+		if ((ThisWin.conf.dataParent.action === 'add') 
+		  ||(ThisWin.conf.dataParent.action === 'copy')) {
+			ThisWin.conf.dataParent.recordFn(newdata,
+				function(){
+					onDataModifed(false);
+					if (close){ThisWin.close();}
+				}
+			);
+		}
+		if (ThisWin.conf.dataParent.action === 'edit') {
+			ThisWin.conf.dataParent.record.set(newdata);
+			ThisWin.conf.dataParent.recordFn(ThisWin.conf.dataParent.record,
+				function(){
+					onDataModifed(false);
+					if (close){ThisWin.close();}
+				}
+			);
+		}	
+	}	
+}
+
+function setAccess() {		
+	var ro = editRo.getValue();
+	editName.setDisabled(ro);
+	editSystem.setDisabled(ro);
+	editTitle.setDisabled(ro);
+}
+
+//*************************************************   D O P    ***********************************************************************
+
+
+
+function getValueFromStore(store, name) {
+	var rec = store.findRecord('name',name);
+	if (rec) {
+		return rec.data.value;
+	}
+}
+
+function getValueFromObjectArray(source, name) {
+  for (var i = 0; i < source.length; i++) {
+    if (source[i].name === name) {
+      return source[i].value;
+    }
+  }
+}
+
+function findIdxFromObjectArray(source, name) {
+  for (var i = 0; i < source.length; i++) {
+    if (source[i].name === name) {
+      return i;
+    }
+  }
+}
+
+
+function onTabTreeElementsChange( obj, selected, eOpts ) {
+	btnElementsDelete.setDisabled(!(selected.length !== 0 && selected[0].data.allowDrag));
+	onTreeElementLoad();		
+}
+
+
+function onElDel(){
+	var selected = TabTreeElements.getSelectionModel().getSelection()[0];
+	if (selected) {
+		if (selected.data.allowDrag) {
+			var msg = Ext.MessageBox.show({
+				title:'Удаление',
+				buttons: Ext.MessageBox.YESNO,
+				icon: Ext.MessageBox.QUESTION,
+				msg: 'Удалить запись "'+selected.data.name+'"?',
+				fn: function(btn) {
+					if (btn == 'yes') {
+						selected.remove(true);
+						StoreP.removeAll();
+						StoreP.lastid = 0;
+						StoreE.removeAll();
+						StoreE.lastid = 0;
+						onDataModifed(true);
+					}
+				},});
+			msg.alignTo(ThisWin, 'c-c'); //По центру окна
+		}
+	}
+}
+
+//*************************************************   E L E M E N T S    ***********************************************************************
+
+function onTreeElementLoad() {
+	var record  = TabTreeElements.getSelectionModel().getSelection()[0];
+    if (record) {
+		setTreeElementData(record);
+	}
+}
+
+function setTreeElementData(element) {
+	try {
+		//debugger;
+		var elemRecord = element.data;
+		
+		var dataP = [];
+		var dataE = [];
+		
+		var findComponent = TreeStoreComponents.FindComponent(elemRecord.component);
+		if (findComponent){
+			//from Component
+			var config = findComponent.config; //JSON.parse(findComponent.data.config);
+			
+			//--------------------------------------------------
+			if (TreeStoreElements.getRootNode().childNodes[0].data.id !== elemRecord.id){
+				dataP.push({
+					name: 'Name',
+					value: elemRecord.name,
+				});	
+			}
+	
+			
+		
+			for(var i in config.properties) {
+				dataP.push({
+					name: config.properties[i].name,
+					value: '',
+				});				
+			}
+			
+			//--------------------------------------------------
+			
+			for(var i in config.events) {
+				dataE.push({
+					name: config.events[i].name,
+					value: '',
+				});					
+			}
+			
+			//from element
+			var config = elemRecord.config; //JSON.parse(elemRecord.config);
+			var elemProperties = config.properties;
+			for(var i in elemProperties) {
+				var id = findIdxFromObjectArray(dataP, elemProperties[i].name);
+				if (id >= 0){
+					dataP[id].value = elemProperties[i].value;
+				} else {
+					dataP.push({
+						name:  elemProperties[i].name,
+						value: elemProperties[i].value,
+					});
+				}	
+			}
+			
+			
+			var elemEvents = config.events;
+			for(var i in elemEvents) {
+				var id = findIdxFromObjectArray(dataE, elemEvents[i].name);
+				if (id >= 0){
+					dataE[id].value = elemEvents[i].value;
+				} else {
+					dataE.push({
+						name:  elemEvents[i].name,
+						value: elemEvents[i].value,
+					});
+				}
+			}
+			
+		} 
+		
+		StoreP.loadRawData(dataP);
+		StoreE.loadRawData(dataE);
+		
+	} catch (err) {
+		console.log('Error setTreeElementData',err);
+	}
+}
+
+
+function getTreeElementData() {
+	
+	var properties = [];
+	var events = [];
+	
+	StoreP.clearFilter(false);
+	StoreE.clearFilter(false);
+	
+	var records = StoreP.data.items;
+	for(var i in records) {
+		if ((records[i].data.value !== '') && (records[i].data.name !== 'Name')) {
+			properties.push({
+				name:  records[i].data.name,
+				value: records[i].data.value,
+			});
+		}
+	}
+	
+	var records = StoreE.data.items;
+	for(var i in records) {
+		if (records[i].data.value !== '') {
+			events.push({
+				name:  records[i].data.name,
+				value: records[i].data.value,
+			});
+		}
+	}
+	
+	FiltredPE();
+	
+	return {
+		properties:  properties,
+		events:      events,
+	};
+}
+
+
+
+function onSaveTreeElement() {
+    //debugger;
+	var record  = TabTreeElements.getSelectionModel().getSelection()[0];
+    if (record) {
+		var newname = getValueFromStore(StoreP,'Name');
+		
+		if (newname) {
+			record.set('name', newname);
+			record.set('text', getLabelElement(newname, record.data.component));
+		}
+		
+		record.set('config',getTreeElementData());
+		record.commit();
+		
+		//record.save();
+		//TabTreeElements.sync();
+		
+		onDataModifed(true);
+	}	
+}
+
+
+
+//*************************************************  C O M P I L E    ***********************************************************************
+
+
+
+function elementsCompile(node, code, config){
+	var newcode = code;
+	if (node) {
+		for(var i in node.childNodes) {
+			var recNode = Ext.apply({}, node.childNodes[i].data);
+			recNode.children = node.childNodes[i].childNodes;
+			
+			newcode = elementsCompile(node.childNodes[i], newcode, config)
+			
+			var component = StoreComponents.findRecord('name', new RegExp('^'+recNode.component+'$'));
+			if (component){	
+				try {
+					component  = component.copy().data;			
+					component.config = JSON.parse(component.config);
+					var constructorFunction = new Function(App.Util.Utf8.decode(App.Util.base64.decode(component.config.constructor)));
+					var elementRaw = constructorFunction().compile(config.window, component, recNode, config.preview);
+					newcode += '\n'+elementRaw;
+				} catch (err) {
+					Ext.Msg.alert({
+						title:'Ошибка компиляции компоненты!',
+						msg: 'Компонента: '+recNode.component+'<br>Ошибка: '+err.name+'<br>Описание: '+err.message,
+						icon: Ext.MessageBox.WARNING,
+						buttons: Ext.Msg.OK,
+						modal: true,
+					});
+				}
+			}
+		}
+	} 
+	return newcode;
+}
+
+function elementCompile(node, code, config){			
+	var newcode = code;
+	var recNode = Ext.apply({}, node.data);
+	recNode.children = node.childNodes;
+			
+	var component = StoreComponents.findRecord('name', new RegExp('^'+recNode.component+'$'));
+	if (component){	
+		try {
+			component  = component.copy().data;			
+			component.config = JSON.parse(component.config);
+			var constructorFunction = new Function(App.Util.Utf8.decode(App.Util.base64.decode(component.config.constructor)));
+			var elementRaw = constructorFunction().compile(config.window, component, recNode, config.preview);
+			newcode += '\n'+elementRaw;
+		} catch (err) {
+			Ext.Msg.alert({
+				title:'Ошибка компиляции компоненты!',
+				msg: 'Компонента: '+recNode.component+'<br>Ошибка: '+err.name+'<br>Описание: '+err.message,
+				icon: Ext.MessageBox.WARNING,
+				buttons: Ext.Msg.OK,
+				modal: true,
+			});
+		}
+	}
+	return newcode;
+}
+
+
+function onPreview() {
+	TabsAll.setActiveTab(2);
+	
+	var win = getWindowData();
+	
+	//var src = 'try{\n var ThisWin = Ext.getCmp("'+PanelPreview.id+'"); ThisWin.Elements = {}; ';
+	var src = 'var ThisWin = Ext.getCmp("'+PanelPreview.id+'");\nThisWin.Elements = {}; ';
+	
+	PanelPreview.hide();
+	PanelPreview.removeAll();
+	PanelPreview.show();
+	
+	var window = Ext.apply({},win);
+	window.config = JSON.parse(window.config);
+	
+	var nodeRoot    = TreeStoreElements.getRootNode();
+	var nodeThisWin = nodeRoot.childNodes[0];
+	var nodeExtend  = nodeRoot.childNodes[1];
+	
+	StoreComponents.load();
+	src = src+'\n'+App.Util.Utf8.decode(App.Util.base64.decode(window.config.code))+'\n';
+	
+	src = elementsCompile(nodeExtend, src, {window:window, preview:  true});
+	src = elementsCompile(nodeThisWin, src, {window:window, preview: true});
+	src = elementCompile(nodeThisWin, src, {window:window, preview:  true});
+
+	//src = src + '\n ThisWin.doLayout();} catch(err) { console.log("Error in Preview", err);}';
+	
+	try {
+		(new Function(src))();
+	} catch (err) {
+		/*Ext.Msg.alert({
+			title:'Ошибка предпросмотра!',
+			msg: 'Ошибка: '+err.name+'<br>Описание: '+err.message+'<br>SRC: '+src,
+			icon: Ext.MessageBox.WARNING,
+			buttons: Ext.Msg.OK,
+			modal: true,
+		});*/
+	}
+}	
+	
+	
+
+function onCompile(win) {
+	var src = '';
+	//TabsAll.setActiveTab(2);
+	
+	var window = Ext.apply({},win);
+	window.config = JSON.parse(window.config);
+	
+	var nodeRoot    = TreeStoreElements.getRootNode();
+	var nodeThisWin = nodeRoot.childNodes[0];
+	var nodeExtend  = nodeRoot.childNodes[1];
+	
+	StoreComponents.load();
+	
+	src = elementsCompile(nodeExtend, src, {window:window, preview: false});
+	src = elementsCompile(nodeThisWin, src, {window:window, preview: false});
+	src = elementCompile(nodeThisWin, src, {window:window, preview: false});
+	/*
+	window.config = JSON.parse(window.config);
+	var elements = window.config.elements;
+	for(var i in elements) {
+		var element   = elements[i];
+		element.config = JSON.parse(element.config);
+		var component = StoreComponents.findRecord('name', element.component);
+		if (component){	
+			try {
+				component = component.copy().data;			
+				component.config = JSON.parse(component.config);
+				var constructorFunction = new Function(App.Util.base64.decode(component.config.constructor));
+				var elementRaw = constructorFunction().compile(window, component, element);
+				src += '\n'+elementRaw;
+			} catch (err) {}
+		}
+	}
+	var data = {
+		elements: src,
+		module: App.Util.base64.decode(window.config.code),
+	};
+	*/
+	
+	var data = {
+		elements: src,
+		module: App.Util.Utf8.decode(App.Util.base64.decode(window.config.code)),
+		fnCreate: getValueFromObjectArray(window.config.events, 'Create') || 'onWindowCreate',
+	};
+	
+	TextAreaRaw.setValue(App.Designer.WindowTemplate.apply(data));
+}
+
+
+function onBeforeClose () {
+	if (ThisWin.CLOSING) {return true;}
+	if (ThisWin.Modifed){
+		var msg = Ext.MessageBox.show({
+			title:'Сохранение',
+			buttons: Ext.MessageBox.YESNO,
+			icon: Ext.MessageBox.QUESTION,
+			msg: 'Данные были изменены, сохранить изменения?',
+			fn: function(btn) {
+				if (btn == 'yes') {
+					onSave(true);
+				} else {
+					ThisWin.CLOSING = true;
+					ThisWin.close();
+				}
+		},});
+		msg.alignTo(ThisWin, 'c-c'); //По центру окна
+		return false;
+	}
+}
+//===================================================================================	
+//---------------------------------- GridP ------------------------------------------
+//function onGridPSelectionChange( obj, selected, eOpts ) {//
+//	console.log('onGridPSelectionChange', selected);
+//	ToolButtonPropertiesEdit.setDisabled(selected.length === 0);
+//	ToolButtonPropertiesDelete.setDisabled(selected.length === 0);
+//}
+
+//============================================================================================================================
+//============================================================================================================================
+//             #     #  #  #    #        #######  #        #######  #     #  #######  #    #  #######   ######   
+//             #     #  #  ##   #        #        #        #        ##   ##  #        ##   #     #     #         
+//             #     #  #  # #  #        ####     #        ####     # # # #  ####     # #  #     #      #####    
+//             #  #  #  #  #  # #        #        #        #        #  #  #  #        #  # #     #           #   
+//              ## ##   #  #   ##        #######  #######  #######  #     #  #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+
+
+
+//===================================================================================	
+//----------------------------- COMPONENTS STORE ------------------------------------
+var StoreComponents = ThisWin.Elements.StoreComponents = App.Designer.ComponentStore;
+var TreeStoreComponents = ThisWin.Elements.TreeStoreComponents = Ext.create('Ext.data.TreeStore', {
+    Components: [],
+	FindComponent: function(name){
+		for(var i in this.Components) {
+			if (this.Components[i].name === name) {
+				return this.Components[i];
+			}
+		}
+	}, 
+	fields: [
+		{ name: 'id',     typs: 'int' },
+		{ name: 'text',   typs: 'string' },
+        { name: 'config', typs: 'auto' }
+    ],
+	root: {},
+    proxy: {
+        type: 'memory',
+    }
+});
+StoreComponents.on('load', function(store, records, successful, eOpts) {
+	LoadComponents();			
+});
+
+//----------------------------- COMPONENTS TREE ------------------------------------
+var TreeComponentsPanel = ThisWin.Elements.TreeComponentsPanel = Ext.create('Ext.tree.Panel', {
+    //title: 'Components',
+    //icon: 'images/ico/script16.png',    
+	layout: 'fit',
+	border: false,
+    rootVisible: false,
+	useArrows: true,       
+	store: TreeStoreComponents,
+	viewConfig: {
+		plugins: {
+			ptype: 'treeviewdragdrop',
+			enableDrop: true,
+			enableDrag: true,
+			//enableSort: true,
+			//allowContainerDrop: true
+		},
+		copy: true,
+	},
+});
+
+
+//===================================================================================
+//-------------------------- BASE ELEMENTS STORE ------------------------------------
+/*
+var StoreElements = ThisWin.Elements.StoreElements = Ext.create('Ext.data.Store',{
+	lastid: 0,
+	autoLoad: false,
+	fields:  [
+		{name: 'name',      typs: 'string' },
+		{name: 'component', typs: 'string' },
+		{name: 'config',    typs: 'auto' },
+	],
+});
+*/
+
+//===================================================================================	
+//--------------------------- PROPERTIES STORE --------------------------------------
+var StoreP = ThisWin.Elements.StoreP = Ext.create('Ext.data.Store',{
+	fields: [  
+		//{name: 'id',   	 typs: 'int'	 },
+		{name: 'name',   typs: 'string'	 },
+		{name: 'value',  typs: 'string'	 },
+	],
+	data: [],
+});
+//===================================================================================	
+//--------------------------- PROPERTIES GRID ---------------------------------------
+var GridPFilter = ThisWin.Elements.GridPFilter = Ext.create('Ext.form.field.Text', {
+	emptyText: 'Filter',
+	listeners:{change: onFilterChange,}
+})
+var tbGridP = ThisWin.Elements.tbGridP = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [GridPFilter],
+});
+
+var GridP = ThisWin.Elements.GridP = Ext.create('Ext.grid.Panel', {
+	border:false,
+	store: StoreP,
+	selType: 'cellmodel',
+	tbar:[tbGridP],
+    plugins: {
+        ptype: 'cellediting',
+        clicksToEdit: 1,
+    },
+	columns: [
+			{ text: 'id', 		dataIndex: 'id'	, hidden: true},
+			{
+				text: 'Name',
+				dataIndex: 'name',
+				renderer: function(v, cellValues, rec) {
+					if (rec.get('value') !== ''){
+						return '<i>'+v+'</i>';
+					} else {
+						return v;
+					}
+				},
+			},
+			{
+				flex: 1,
+				text: 'Value',
+				dataIndex: 'value',
+				renderer: function(v, cellValues, rec) {
+					return '<b><i>'+v+'</i></b>';
+				},
+				editor: {allowBlank: true},
+			},
+			{
+				xtype: 'actioncolumn',
+				width: 50,
+				items: [
+					{
+						icon: 'images/ico/script16.png',
+						handler: function (grid, rowIndex, colIndex) {
+							var rec = grid.getStore().getAt(rowIndex);
+							var dataParent = {
+								name: rec.get('name'),
+								value: rec.get('value'),
+								cb: function(value){
+									rec.set('value', value);
+									rec.commit();
+									onSaveTreeElement();
+									onDataModifed(true);
+								},
+							};
+							App.Window.LoadDbWin('des.Value.Edit', 'des.Value.Edit_'+rec.get('name'),ThisWin, {dataParent:dataParent, modal: true});
+						},
+					},{
+						icon: 'images/ico/delete16.png',
+						handler: function (grid, rowIndex, colIndex) {
+							var rec = grid.getStore().getAt(rowIndex);
+							rec.set('value','');
+							rec.commit();
+							onSaveTreeElement();
+							onDataModifed(true);
+						}
+					},
+				]
+			},
+		
+	],
+	listeners: {
+			//celldblclick:    onPropertiesEdit,
+			//selectionchange: onGridPSelectionChange,
+			edit: function(editor, e) {
+				e.record.commit();
+				onSaveTreeElement();
+			},
+	},
+});
+
+
+
+
+//===================================================================================	
+//------------------------------ EVENTS STORE ---------------------------------------
+var StoreE = ThisWin.Elements.StoreE = Ext.create('Ext.data.Store',{
+	fields:  [
+		{name: 'name',     typs: 'string' },
+		{name: 'value',    typs: 'string' },
+	],
+	data: [],
+});
+//===================================================================================	
+//------------------------------ EVENTS GRID ----------------------------------------
+var GridEFilter = ThisWin.Elements.GridEFilter = Ext.create('Ext.form.field.Text', {
+	emptyText: 'Filter',
+	listeners:{change: onFilterChange,}
+});
+var tbGridE = ThisWin.Elements.tbGridE = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [GridEFilter],
+});
+var GridE = ThisWin.Elements.GridE = Ext.create('Ext.grid.Panel', {
+	border: false,
+	store: StoreE,
+	selType: 'cellmodel',
+	tbar:[tbGridE],
+    plugins: {
+        ptype: 'cellediting',
+        clicksToEdit: 1,
+    },
+	columns: [
+		{ text: 'id', 		dataIndex: 'id'	, hidden: true},
+		{ text: 'Name',
+			dataIndex: 'name',
+			renderer: function(v, cellValues, rec) {
+				if (rec.get('value') !== ''){
+					return '<i>'+v+'</i>';
+				} else {
+					return v;
+				}
+			},
+		},
+		{ text: 'Value',
+				dataIndex: 'value',
+				flex: 1,
+				renderer: function(v, cellValues, rec) {
+					return '<b><i>'+v+'</i></b>';
+				},
+				editor: {allowBlank: true},
+		},
+		{
+			xtype: 'actioncolumn',
+			width: 50,
+			items: [
+				{
+					icon: 'images/ico/script16.png',
+					handler: GridEActionFn,
+				},{
+					icon: 'images/ico/delete16.png',
+					handler: function (grid, rowIndex, colIndex) {
+						var rec = grid.getStore().getAt(rowIndex);
+						rec.set('value','');
+						rec.commit();
+						onSaveTreeElement();
+						onDataModifed(true);
+					}
+				},
+			]
+		},
+		//{ text: 'Value',	dataIndex: 'value', flex:1, editor: {allowBlank: true}},
+	],
+	listeners: {
+		//celldblclick: GridEActionFn,
+		//selectionchange: onGridESelectionChange,
+		edit: function(editor, e) {
+				e.record.commit();
+				onSaveTreeElement();
+			},
+	},
+});
+
+//===================================================================================	
+//---------------------------- ELEMENTS TREE STORE ----------------------------------
+var TreeStoreElements = ThisWin.Elements.TreeStoreElements = Ext.create('Ext.data.TreeStore', {
+	fields: [
+		//{ name: 'id', 		 typs: 'int' },
+		{ name: 'text', 	 typs: 'string' },
+		{ name: 'name', 	 typs: 'string' },
+		{ name: 'component', typs: 'string' },
+        { name: 'config', 	 typs: 'auto' }
+    ],
+	root: {
+			text: 'Constructor',
+            expanded: true,
+			allowDrag: false,
+			allowDrop: false,            
+			children: [{
+				text: '<i>ThisWin:</i> <b>Window</b>',
+				name: 'Window',
+				component: 'ThisWin',
+				config: {
+					properties: [],
+					events: [],
+				},
+				icon: 'images/ico/layout16.png',
+				allowDrag: false,
+				allowDrop: true, 
+                leaf: false,
+                expanded: true,
+            },
+            {
+				text: "Extend",
+				name: "Extend",
+				config: {},
+				icon: 'images/ico/puzzle16.png',
+				allowDrag: false,
+				allowDrop: true, 
+                leaf: false,
+                expanded: true,
+            }]
+        },
+	proxy: {
+        type: 'memory',
+    }
+});
+
+
+//===================================================================================	
+//-------------------------- ELEMENTS TREE TOOLBAR ----------------------------------
+//var btnElementsAdd    = ThisWin.Elements.btnElementsAdd    = Ext.create('Ext.Button', {icon: 'images/ico/add16.png',    disabled: false,  listeners: {click: onElAdd,},});
+var btnElementsDelete = ThisWin.Elements.btnElementsDelete = Ext.create('Ext.Button', {text: 'Delete', icon: 'images/ico/delete16.png', disabled: true,   listeners: {click: onElDel,},});
+
+var tbElements = ThisWin.Elements.tbElements = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [/*btnElementsAdd, */ 
+			{
+                text: 'Expand All',
+                handler: function(){TabTreeElements.expandAll();},
+            }, {
+                text: 'Collapse All',
+                handler: function(){TabTreeElements.collapseAll();},
+            }, btnElementsDelete],
+});
+
+//===================================================================================	
+//---------------------------- ELEMENTS TREE ----------------------------------
+var TabTreeElements = ThisWin.Elements.TabTreeElements = Ext.create('Ext.tree.Panel', {
+    //title: 'Elements',
+    //icon: 'images/ico/script16.png',    
+	layout: 'fit',
+	border: false,
+    rootVisible: false,
+	useArrows: true,       
+	store: TreeStoreElements,
+	tbar:[tbElements],
+	viewConfig: {
+		plugins: {
+			ptype: 'treeviewdragdrop',
+			enableDrop: true,
+			enableDrag: true,
+			allowContainerDrop: true
+		},
+		listeners : {
+			beforedrop: function(node, data, overModel, dropPosition, dropHandlers, eOpts){
+				//console.log('===================================================================================');
+				//console.log('DRAG AND DROP beforedrop\n', 'node\n', node, 'data\n', data, 'overModel\n', overModel, 'dropPosition\n', dropPosition, 'dropHandlers\n', dropHandlers, 'eOpts\n', eOpts);
+				
+				//debugger;
+				if (data.copy) {
+					var comp = data.records[0].get('text');
+					var name = comp+'1';
+					
+					var tdata = {
+						text: getLabelElement(name, comp),
+						name: name,
+						allowDrop: true,
+						allowDrag: true,
+						leaf: false,
+						icon: data.records[0].get('icon'),
+						component: comp, 
+						config: {	
+							properties: [],
+							events: [],
+						},
+					};
+					
+					overModel.appendChild(tdata);
+					overModel.expand();
+					onDataModifed(true);
+
+					return false;
+				} else {
+					
+					return true;
+					
+				}
+				
+				
+				//debugger;
+				
+				//dropHandlers.cancelDrop();
+				
+				
+			/*
+				dropHandlers.wait = true;
+				Ext.MessageBox.confirm('Drop', 'Are you sure', function(btn){
+					if (btn === 'yes') {
+						
+						dropHandlers.processDrop();
+					} else {
+						dropHandlers.cancelDrop();
+					}
+				});*/
+				
+			},
+			drop: function (node, data, overModel, dropPosition, eOpts) {
+				/*
+				data.records[0].set('text', 'HELLO');
+				
+				data.records[0].set('allowDrop', true);
+				data.records[0].set('allowDrag', true);
+				data.records[0].set('leaf', false);
+				data.records[0].commit();
+				*/
+				//console.log('DRAG AND DROP drop', node, data, overModel, dropPosition, eOpts);
+			}
+		}
+	},
+	listeners: {
+		selectionchange: onTabTreeElementsChange,
+	},
+});
+
+
+
+//===================================================================================	
+//------------------------------------- OPTIONS FORM --------------------------------	
+var editRo= ThisWin.Elements.editRo = Ext.create('Ext.form.field.Checkbox', {
+	name: 'ro',
+    fieldLabel: 'Read Only',
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editSystem = ThisWin.Elements.editSystem = Ext.create('Ext.form.ComboBox', {
+    name: 'label',
+	fieldLabel: 'System',
+    store: App.Designer.SystemStore,
+	editable: false,
+	//queryMode: 'local',
+    displayField: 'title',
+    valueField: 'guid',
+	allowBlank: false,
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editName = ThisWin.Elements.editName = Ext.create('Ext.form.field.Text', {
+	name: 'name',
+    fieldLabel: 'Name',
+    value: '',
+	allowBlank: false,
+	listeners:{
+		change: function( obj, newValue, oldValue, eOpts){
+			SetWinName(newValue);
+			onDataModifed(true);
+		}
+	}
+});
+
+var editTitle = ThisWin.Elements.editTitle = Ext.create('Ext.form.field.Text', {
+	name: 'title',
+    fieldLabel: 'Title',
+    value: '',
+	allowBlank: false,
+	listeners:{
+		change: function( obj, newValue, oldValue, eOpts){
+			onDataModifed(true);
+		}
+	}
+});
+
+var TabOptions = ThisWin.Elements.TabOptions = Ext.create('Ext.form.Panel', {
+    frame: true,
+    border:false,
+	title: 'Options',
+	icon: 'images/ico/view16.png',
+	width: 90,
+    bodyPadding: 5,
+    fieldDefaults: {
+        labelAlign: 'left',
+        labelWidth: 100,
+        anchor: '100%'
+    },
+    items: [editRo, editSystem, editName, editTitle],
+});
+
+
+//===================================================================================	
+//------------------------------ CODE EDITOR ---------------------------------------- 
+var TextAreaCode = ThisWin.Elements.TextAreaCode = Ext.create('App.components.aceeditor.WithToolbar', {
+    title: 'Code',
+	icon: 'images/ico/script16.png',
+    parser: 'javascript',
+    printMargin: true
+});
+
+//===================================================================================	
+//------------------------------- RAW EDITOR ---------------------------------------- 
+var TextAreaRaw = ThisWin.Elements.TextAreaRaw = Ext.create('App.components.aceeditor.WithToolbar', {
+    title: 'Raw',
+	icon: 'images/ico/script16.png',
+	//theme: 'eclipse',
+    parser: 'javascript',
+    printMargin: true,
+});
+
+
+//===================================================================================	
+//---------------------------- TAB Properties ---------------------------------------
+var PanelProperties = ThisWin.Elements.PanelProperties = Ext.create('Ext.panel.Panel', {
+	title: 'Properties',
+	icon: 'images/ico/view16.png',
+	layout: 'fit',
+	border: false,
+	items: [GridP],	
+});
+
+//===================================================================================	
+//----------------------------- TAB Events ------------------------------------------
+var PanelEvents = ThisWin.Elements.PanelEvents = Ext.create('Ext.panel.Panel', {
+	title: 'Events',
+	icon: 'images/ico/view16.png',
+	layout: 'fit',
+	border: false,
+	items: [GridE],	
+});
+
+//===================================================================================	
+//----------------------------- TAB Preview ------------------------------------------
+var PanelPreview = ThisWin.Elements.PanelPreview = Ext.create('Ext.Window', {
+    width: 100,
+    height: 100,
+    x: 10,
+    y: 10,
+    constrain: true,
+    layout: 'fit',
+	listeners: {
+		beforeclose: function( panel, eOpts ){
+			return false;
+		}
+	}
+});
+		
+
+var TabPanelPreview = ThisWin.Elements.TabPanelPreview = Ext.create('Ext.panel.Panel', {
+	title: 'Preview',
+	icon: 'images/ico/view16.png',
+	border: false,
+	items: [PanelPreview],	
+});
+
+var TabsAll = ThisWin.Elements.TabsAll = Ext.create('Ext.tab.Panel', {
+	//minWidth: 250,
+	region: 'center',
+	items:[
+		TabOptions,
+		TextAreaCode,
+		TabPanelPreview,
+		TextAreaRaw,
+	]
+});
+
+//---------------- PANEL EDITOR --------------------
+var PanelEditor = ThisWin.Elements.PanelEditor = Ext.create('Ext.panel.Panel', {
+	border: false,
+	layout: 'border',
+	items: [
+		{
+            region: 'west',
+            xtype: 'panel',
+			split: true,
+			border: false,
+            width: 400,
+			minWidth: 250,
+			layout: 'border',
+			items:[
+				{
+					region: 'west',
+					xtype: 'panel',
+					title: 'Components',
+					titleCollapse: true,
+					collapsed: true,
+					collapsible: true,
+					split: true,
+					width: 150,
+					minWidth: 100,
+					maxWidth: 250,
+					layout: 'fit',
+					items: TreeComponentsPanel,
+				},{
+					region: 'center',
+					xtype: 'panel',
+					layout: 'border',
+					items:[
+						{
+							region: 'center',
+							xtype: 'panel',
+							border: false,
+							split: true,
+							layout: 'fit',
+							height: '50%',
+							items: TabTreeElements,
+						},{
+							region: 'south',
+							xtype: 'tabpanel',
+							border: false,
+							split: true,
+							layout: 'fit',
+							height: '50%',
+							items: [PanelProperties, PanelEvents]
+						},
+					],
+				}
+			]
+        }, 
+		TabsAll,
+	],	
+});
+
+
+var CheckPreview = ThisWin.Elements.CheckPreview = Ext.create('Ext.form.field.Checkbox', {
+
+});
+
+//===================================================================================	
+//----------------------------- MAIN PANEL ------------------------------------------
+var Panel = ThisWin.Elements.Panel = Ext.create('Ext.panel.Panel', {
+	layout: 'fit',
+	border: false,
+	items:[PanelEditor],
+	buttons: [
+	CheckPreview,
+	{
+        text: 'Preview',
+        handler: function() {
+			onPreview();   
+        }
+    },{
+        text: 'Run',
+        handler: function() {
+			onWindowSave(false);
+			var data = getWindowData();
+			App.Window.LoadDbWin(data.name);
+        }
+    },/*{
+        text: 'Save',
+        handler: function() {
+			onWindowSave(false);
+        }
+    },*/{
+        text: 'OK',
+        handler: function() {
+			onWindowSave(true);
+        }
+    },{
+        text: 'Cancel',
+        handler: function() {
+			if (ThisWin.Modifed){
+				var msg = Ext.MessageBox.show({
+					title:'Сохранение',
+					buttons: Ext.MessageBox.YESNO,
+					icon: Ext.MessageBox.QUESTION,
+					msg: 'Данные были изменены, сохранить изменения?',
+					fn: function(btn) {
+						if (btn == 'yes') {
+							onWindowSave(true);
+						} else {
+							ThisWin.close();
+						}
+					},});
+				msg.alignTo(ThisWin, 'c-c'); //По центру окна
+			} else {
+				ThisWin.close();
+			}
+			
+        }
+    }],
+});
+
+ThisWin.add(Panel);
+
+ThisWin.on('beforeclose', onBeforeClose);	
+
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================	
+	
+timerContentTimeOut.destroy();
+if (typeof(onWinCreate)==='function') {onWinCreate(ThisWin);}
+ThisWin.doLayout();

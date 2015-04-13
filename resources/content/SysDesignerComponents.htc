@@ -1,0 +1,246 @@
+var ThisWin = App.Window.getWinById("%ContainerId%");	
+if (!ThisWin){
+	Ext.Msg.alert({
+		title:'Ошибка окна!',
+		msg: 'Не найдено окно "%ContainerId%" для отображения контента.',
+		icon: Ext.MessageBox.WARNING,
+		buttons: Ext.Msg.OK,
+		modal: true,
+	});
+	return;
+}
+
+var Timers = new Ext.util.TaskRunner();
+// Защитный Timer не активности окна
+var timerContentTimeOut = Timers.newTask({
+	run: function () {
+		Ext.Msg.alert({
+			title:'Ошибка окна!',
+			msg: 'Окно "'+ThisWin.name+' ['+ThisWin.id+']" не отвечает.',
+			icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+			buttons: Ext.Msg.OK,
+			modal: true,
+			fn: function(btn) {
+				if (ThisWin) {ThisWin.close();}
+				timerContentTimeOut.destroy();
+			}
+		});
+	},
+	interval: 5000
+});
+timerContentTimeOut.start();
+
+ThisWin.Elements = {};
+ThisWin.Public   = {};
+
+
+
+//============================================================================================================================
+//============================================================================================================================
+//                               #######  #     #  #######  #    #  #######   ######   
+//                               #        #     #  #        ##   #     #     #         
+//                               ####      #   #   ####     # #  #     #      #####    
+//                               #          # #    #        #  # #     #           #   
+//                               #######     #     #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+var EditWin = 'SysDesignerComponentEditor';
+
+function onWinCreate(obj) {
+	obj.setTitle('Система: Компоненты');
+	obj.setIcon('images/ico/puzzle16.png');
+	if (obj.height < 300) {obj.height = 300;}
+	if (obj.width  < 600) {obj.width  = 600;}
+}
+
+
+function onGridCellDblClick( obj, td, cellIndex, record, tr, rowIndex, e, eOpts ) {
+	//console.log('onGridCellDblClick', record.data);
+}
+
+function onGridSelectionChange( obj, selected, eOpts ) {
+	ToolButtonCopy.setDisabled(selected.length === 0);
+	ToolButtonEdit.setDisabled(selected.length === 0);
+	ToolButtonDelete.setDisabled(selected.length === 0);
+}
+
+function onStoreRefresh(obj, eOpts){
+	//console.log('onStoreRefresh', obj);
+}
+
+// DB function Grid
+function OpenEditWindow(uniq, data){
+	App.Window.LoadServerWin(EditWin, EditWin+'_'+uniq, ThisWin, {dataParent:data});
+}
+
+function onGridAdd(obj, e, eOpts){
+	OpenEditWindow( 'new', {
+		action:		'add',
+		record:		new Store.model({name:'New'}),
+		recordFn:	RecordAdd,
+	});
+}
+
+function onGridCopy(obj, e, eOpts){
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		OpenEditWindow( 'new', {
+			action:		'copy',
+			record:		record,
+			recordFn:	RecordAdd,
+		});
+	}
+}
+
+function onGridEdit(obj, e, eOpts){
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		OpenEditWindow( record.data.id, {
+			action:		'edit',
+			record:		record,
+			recordFn:	RecordEdit,
+		});
+	}
+}
+
+function onGridDelete(obj, e, eOpts){
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		var msg = Ext.MessageBox.show({
+			title:'Удаление',
+			buttons: Ext.MessageBox.YESNO,
+			icon: Ext.MessageBox.QUESTION,
+			msg: 'Удалить запись "'+record.data.name+'"?',
+			fn: function(btn) {
+				if (btn == 'yes') {RecordDelete(record);}
+			},
+		});
+		msg.alignTo(ThisWin, 'c-c');
+	}
+}
+
+/* ADD */
+function RecordAdd(record, ok, err){
+	Store.add(new Store.model(record));
+	Store.sync({
+		success: function(batch, options){
+			Store.load();
+			if (typeof ok === 'function') {ok(batch, options);}
+		},
+		failure: function(batch, options){
+			Store.rejectChanges();
+			if (typeof err === 'function') {err(batch, options);}
+		},  				
+	});	
+}
+
+/* EDIT */
+function RecordEdit(record, ok, err){
+	record.save({
+		success: function(batch, options){
+			Store.load();
+			if (typeof ok === 'function') {ok(batch, options);}
+		},
+		failure: function(batch, options){
+			Store.rejectChanges();
+			if (typeof err === 'function') {err(batch, options);}			
+		},
+	});	
+}
+
+/* DELETE */
+function RecordDelete(record, ok, err){
+	Store.remove(record);
+	Store.sync({
+		success: function(batch, options){
+			Store.load();
+			if (typeof ok === 'function') {ok(batch, options);}
+		},
+		failure: function(batch, options){
+			Store.add(Store.getRemovedRecords());
+			Store.rejectChanges();
+			if (typeof err === 'function') {err(batch, options);}
+		},  				
+	});	
+}
+
+//============================================================================================================================
+//============================================================================================================================
+//             #     #  #  #    #        #######  #        #######  #     #  #######  #    #  #######   ######   
+//             #     #  #  ##   #        #        #        #        ##   ##  #        ##   #     #     #         
+//             #     #  #  # #  #        ####     #        ####     # # # #  ####     # #  #     #      #####    
+//             #  #  #  #  #  # #        #        #        #        #  #  #  #        #  # #     #           #   
+//              ## ##   #  #   ##        #######  #######  #######  #     #  #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+//----------------------------------------
+//            ELEMENT Store
+//----------------------------------------
+var Store = ThisWin.Elements.Store = App.Designer.ComponentStore;
+		
+//----------------------------------------
+//            ELEMENT Grid
+//----------------------------------------
+var Grid = ThisWin.Elements.Grid = Ext.create('App.components.data.Grid', {
+	conf:{
+		store: Store,
+		columns: [
+			{ text: 'Id', 		dataIndex: 'id'	, hidden: true},
+			{ text: 'Class',	dataIndex: 'class'},
+			{ text: 'Name',		dataIndex: 'name',	 flex:1,
+				renderer: function(v, cellValues, rec) {
+					return '<img src="images/components/'+v+'.png"></img> '+v;
+				},
+			},
+			{ text: 'Config',	dataIndex: 'config', hidden: true},
+		],
+		/*features: [Ext.create('Ext.grid.feature.Grouping', {groupHeaderTpl: '{name} ({rows.length})' })],*/
+		listeners: {
+			celldblclick:    onGridEdit,
+			selectionchange: onGridSelectionChange,
+			cellkeydown: function( obj, td, cellIndex, record, tr, rowIndex, e, eOpts ){
+				if (e.keyCode === 45) {onGridAdd();}
+				if (e.keyCode === 13) {onGridEdit();}
+				if (e.keyCode === 46) {onGridDelete();}
+			},
+			afterlayout: function(){ToolButtonDelete.setDisabled(true);},
+		},
+	}
+});
+
+//----------------------------------------
+//            ELEMENT ToolbarButton
+//----------------------------------------
+var ToolButtonAdd    = ThisWin.Elements.ToolButtonAdd    = Ext.create('Ext.Button', {text: 'Add'	,  icon: 'images/ico/add16.png',    disabled: false, listeners: {click: onGridAdd,},});
+var ToolButtonCopy   = ThisWin.Elements.ToolButtonCopy   = Ext.create('Ext.Button', {text: 'Copy'	,  icon: 'images/ico/copy16.png',   disabled: true,  listeners: {click: onGridCopy,},});
+var ToolButtonEdit   = ThisWin.Elements.ToolButtonEdit   = Ext.create('Ext.Button', {text: 'Edit'	,  icon: 'images/ico/edit16.png',   disabled: true,  listeners: {click: onGridEdit,},});
+var ToolButtonDelete = ThisWin.Elements.ToolButtonDelete = Ext.create('Ext.Button', {text: 'Delete' ,  icon: 'images/ico/delete16.png', disabled: true,  listeners: {click: onGridDelete,},});
+
+//----------------------------------------
+//            ELEMENT Toolbar
+//----------------------------------------
+var Toolbar = ThisWin.Elements.Toolbar1 = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [ToolButtonAdd, ToolButtonCopy, ToolButtonEdit, ToolButtonDelete],
+});
+
+//----------------------------------------
+//            ELEMENT Panel
+//----------------------------------------
+var Panel = ThisWin.Elements.Panel = Ext.create('Ext.panel.Panel', {
+    //title: 'Компоненты',
+	layout: 'fit',
+	tbar:[Toolbar],
+	items:[Grid],
+});
+
+ThisWin.add(Panel);	
+
+
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+	
+timerContentTimeOut.destroy();
+if (typeof(onWinCreate)==='function') {onWinCreate(ThisWin);}
+ThisWin.doLayout();

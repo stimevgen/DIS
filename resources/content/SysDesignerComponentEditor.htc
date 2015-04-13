@@ -1,0 +1,979 @@
+var ThisWin = App.Window.getWinById("%ContainerId%");	
+if (!ThisWin){
+	Ext.Msg.alert({
+		title:'Ошибка окна!',
+		msg: 'Не найдено окно "%ContainerId%" для отображения контента.',
+		icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+		buttons: Ext.Msg.OK,
+		modal: true,
+	});
+	return;
+}
+
+var Timers = new Ext.util.TaskRunner();
+// Защитный Timer не активности окна
+var timerContentTimeOut = Timers.newTask({
+	run: function () {
+		Ext.Msg.alert({
+			title:'Ошибка окна!',
+			msg: 'Окно "'+ThisWin.name+' ['+ThisWin.id+']" не отвечает.',
+			icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+			buttons: Ext.Msg.OK,
+			modal: true,
+			fn: function(btn) {
+				if (ThisWin) {ThisWin.close();}
+				timerContentTimeOut.destroy();
+			}
+		});
+	},
+	interval: 5000
+});
+timerContentTimeOut.start();
+
+ThisWin.Elements = {};
+ThisWin.Public   = {};
+
+//============================================================================================================================
+//============================================================================================================================
+//                               #######  #     #  #######  #    #  #######   ######   
+//                               #        #     #  #        ##   #     #     #         
+//                               ####      #   #   ####     # #  #     #      #####    
+//                               #          # #    #        #  # #     #           #   
+//                               #######     #     #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+
+function onWinCreate(obj) {
+	//obj.setTitle('Редактор компоненты');
+	obj.setIcon('images/ico/puzzle16.png');
+	if (obj.height < 500) {obj.height = 500;}
+	if (obj.width  < 600) {obj.width  = 600;}
+	
+	if (typeof(obj.parent) !== 'undefined'){
+		var rec = obj.conf.dataParent.record.data;	
+		SetWinTitle(rec.name, obj.conf.dataParent.action);
+		onLoad(rec,obj.conf.dataParent.action);
+		onDataModifed((obj.conf.dataParent.action === 'add'));
+	} else {
+		Ext.Msg.alert('Error', 'Window not parent.');
+	}
+}
+
+function SetWinTitle(name, action){
+	ThisWin.Title = '"'+name+'": Компонента ('+action+')';
+	onDataModifed(ThisWin.Modifed);
+}
+
+function onDataModifed(status){
+	ThisWin.Modifed = status;
+	var ModStr = '';
+	if (ThisWin.Modifed) {ModStr = ' *';}
+	ThisWin.setTitle(ThisWin.Title+ModStr);
+}
+
+//===================================================================================	
+//----------------------------- MAIN TOOLBAR ----------------------------------------
+function onLoad( data, action ) {
+	TabPanel.setActiveTab(0);
+	try {
+		//----------------------
+		//   CLEAR DATA
+		StoreP.removeAll();
+		StoreP.lastid = 0;
+		StoreE.removeAll();
+		StoreE.lastid = 0;
+		editName.setValue('');
+		editClass.setValue('');
+		//editIcon.setValue('');
+		editTip.setValue('');
+		editDescription.setValue('');
+		editExt.setValue('');
+		editUrl.setValue('');
+		editFuncname.setValue('');
+		TextAreaDocs.setValue('');
+		//TextAreaRaw.setValue('');
+		TextAreaConstructor.setValue('');
+		
+		//----------------------
+		//    LOAD DATA
+		editName.setValue(data.name);
+		editClass.setValue(data.class);
+		
+		var config = JSON.parse(data.config);
+		//editIcon.setValue(config.icon);
+		editTip.setValue(config.tip);
+		editDescription.setValue(config.description);
+		editExt.setValue(config.ext);
+		editUrl.setValue(config.url);
+		editFuncname.setValue(config.funcname);	
+		//formOptions.getForm().setValues(mydata);
+		
+		//----------------------
+		StoreP.removeAll();
+		StoreP.lastid = 0;
+		
+		var properties = config.properties;
+		for(var i in properties) {
+			properties[i].id = ++StoreP.lastid;
+			var record = new StoreP.model(properties[i]);
+			StoreP.add(record);
+			StoreP.sync({
+				success: function(batch, options){
+					console.log('AddRecord success', batch, options);
+					//StoreP.load();
+				},
+				failure: function(batch, options){
+					StoreP.rejectChanges(); //store.add(store.getRemovedRecords());
+					console.log('AddRecord failure', batch, options);
+				},  				
+			});	
+		}
+		
+		var events = config.events;
+		for(var i in events) {
+			events[i].id = ++StoreE.lastid;
+			var record = new StoreE.model(events[i]);
+			StoreE.add(record);
+			StoreE.sync({
+				success: function(batch, options){
+					console.log('AddRecord success', batch, options);
+					//StoreE.load();
+				},
+				failure: function(batch, options){
+					StoreE.rejectChanges(); //store.add(store.getRemovedRecords());
+					console.log('AddRecord failure', batch, options);
+				},  				
+			});	
+		}
+		
+		TextAreaConstructor.setValue(App.Util.Utf8.decode(App.Util.base64.decode(config.constructor)));
+	} catch (err) {
+
+	}
+	if (action === 'add'){ TextAreaConstructor.setValue('return {\n	compile: function(window, component, element, preview){\n		/* component {name, class, properties, events}*/\n		/* element {name, class, properties, events}*/\n		/* preview (true: preview mode, false: production)*/\n		return (\'Component: \' + component.name);\n	}\n};');}
+}
+
+function onSave(close) {
+	var newdata = {
+		name:        editName.getValue(),
+		class:       editClass.getValue(),
+	};
+	var config = {
+			//icon:        editIcon.getValue(),
+			tip:         editTip.getValue(),
+			description: editDescription.getValue(),
+			url:         editUrl.getValue(),
+			ext:		 editExt.getValue(),
+			funcname:	 editFuncname.getValue(),
+			properties:  [],
+			events:      [],
+			constructor: App.Util.base64.encode(App.Util.Utf8.encode(TextAreaConstructor.getValue())),
+	}
+	var records = StoreP.data.items;
+	for(var i in records) {
+		var record = records[i].data;
+		delete record.id;
+		config.properties.push(record);
+	}
+	var records = StoreE.data.items;
+	for(var i in records) {
+		var record = records[i].data;
+		delete record.id;
+		config.events.push(record);
+	}
+	newdata.config = JSON.stringify(config);
+	
+	if (typeof ThisWin.parent !== 'undefined'){
+		
+		if ((ThisWin.conf.dataParent.action === 'add') 
+		  ||(ThisWin.conf.dataParent.action === 'copy')) {
+			ThisWin.conf.dataParent.recordFn(newdata,
+				function(){
+					onDataModifed(false);
+					if (close){ThisWin.close();}
+				}
+			);
+		}
+		
+		if (ThisWin.conf.dataParent.action === 'edit') {
+			ThisWin.conf.dataParent.record.set(newdata);
+			ThisWin.conf.dataParent.recordFn(ThisWin.conf.dataParent.record,
+				function(){
+					onDataModifed(false);
+					if (close){ThisWin.close();}
+				}
+			);
+		}	
+	}	
+}
+
+function onBeforeClose () {
+	if (ThisWin.CLOSING) {return true;}
+	if (ThisWin.Modifed){
+		var msg = Ext.MessageBox.show({
+			title:'Сохранение',
+			buttons: Ext.MessageBox.YESNO,
+			icon: Ext.MessageBox.QUESTION,
+			msg: 'Данные были изменены, сохранить изменения?',
+			fn: function(btn) {
+				if (btn == 'yes') {
+					onSave(true);
+				} else {
+					ThisWin.CLOSING = true;
+					ThisWin.close();
+				}
+		},});
+		msg.alignTo(ThisWin, 'c-c'); //По центру окна
+		return false;
+	}
+}
+
+//===================================================================================	
+//-------------------------------- TAB DOCS -----------------------------------------
+
+function onOpenDocs() {
+	window.open('http://docs.sencha.com/extjs/5.1.0/output/'+editExt.getValue()+'.js');
+}
+
+function onSyncDocs() {
+Ext.Msg.show({
+    title:'Clear old Data?',
+    msg: 'Clear old Properties and Events?',
+    buttons: Ext.Msg.YESNO,
+    icon: Ext.Msg.QUESTION,
+    fn: function(btn) {
+        if (btn === 'yes') {
+            StoreP.removeAll();
+			StoreE.removeAll();
+			StoreP.lastid = 0;
+			StoreE.lastid = 0;
+        } 
+		
+		try{
+				var docapi = JSON.parse(TextAreaDocs.getValue());
+				for(var i in docapi.members) {
+					var object = docapi.members[i];
+					if (object.tagname == 'cfg') {
+						object.id = ++StoreP.lastid;
+						var record = new StoreP.model({id:object.id, name:object.name});
+						StoreP.add(record);
+						StoreP.sync({
+							success: function(batch, options){
+								console.log('AddRecord success', batch, options);
+								//StoreP.load();
+							},
+							failure: function(batch, options){
+								StoreP.rejectChanges(); //store.add(store.getRemovedRecords());
+								console.log('AddRecord failure', batch, options);
+							},  				
+						});
+					}
+					
+					if (object.tagname == 'event') {
+						object.id = ++StoreE.lastid;
+						var record = new StoreE.model({id:object.id, name:object.name, params:'()'});
+						StoreE.add(record);
+						StoreE.sync({
+							success: function(batch, options){
+								console.log('AddRecord success', batch, options);
+								//StoreE.load();
+							},
+							failure: function(batch, options){
+								StoreE.rejectChanges(); //store.add(store.getRemovedRecords());
+								console.log('AddRecord failure', batch, options);
+							},  				
+						});
+					}
+				}
+			} catch (err) {
+				console.log(err.message);
+			}
+	
+    }
+});
+	
+	
+}
+
+
+
+//===================================================================================	
+//---------------------------------- GridP ------------------------------------------
+function onGridPSelectionChange( obj, selected, eOpts ) {
+	ToolButtonPropertiesEdit.setDisabled(selected.length === 0);
+	ToolButtonPropertiesDelete.setDisabled(selected.length === 0);
+}
+
+//===================================================================================	
+//---------------------------- TOOLBAR GridP ----------------------------------------
+function onPropertiesAdd() {
+	FormP.getForm().reset();
+	FormP.Action = 'new';
+	EditPWindow.setPosition(ThisWin.x+(ThisWin.width/2)-(EditPWindow.width/2), ThisWin.y+(ThisWin.height/2)-(EditPWindow.height/2)); //alignTo(ThisWin, 'c-c');
+	EditPWindow.show();		
+}
+
+function onPropertiesEdit() {
+	FormP.getForm().reset();
+	var record  = GridP.getSelectionModel().getSelection()[0];
+    if (record) {
+		FormP.Action = 'edit';
+		FormP.getForm().setValues(record.data);
+		EditPWindow.setPosition(ThisWin.x+(ThisWin.width/2)-(EditPWindow.width/2), ThisWin.y+(ThisWin.height/2)-(EditPWindow.height/2));
+		EditPWindow.show();
+	}	
+}
+
+function onPropertiesDelete() {
+	DeleteRecord(GridP);
+}
+
+
+//===================================================================================	
+//---------------------------------- GridE ------------------------------------------
+function onGridESelectionChange( obj, selected, eOpts ) {
+	ToolButtonEventsEdit.setDisabled(selected.length === 0);
+	ToolButtonEventsDelete.setDisabled(selected.length === 0);
+}
+
+//===================================================================================	
+//---------------------------- TOOLBAR GridE ----------------------------------------
+function onEventsAdd() {
+	FormE.getForm().reset();
+	FormE.Action = 'new';
+	EditEWindow.setPosition(ThisWin.x+(ThisWin.width/2)-(EditEWindow.width/2), ThisWin.y+(ThisWin.height/2)-(EditEWindow.height/2)); //alignTo(ThisWin, 'c-c');
+	EditEWindow.show();
+}
+
+function onEventsEdit() {
+	FormE.getForm().reset();
+	var record  = GridE.getSelectionModel().getSelection()[0];
+    if (record) {
+		FormE.Action = 'edit';
+		FormE.getForm().setValues(record.data);
+		EditEWindow.setPosition(ThisWin.x+(ThisWin.width/2)-(EditEWindow.width/2), ThisWin.y+(ThisWin.height/2)-(EditEWindow.height/2));
+		EditEWindow.show();
+	}
+}
+
+function onEventsDelete() {
+	DeleteRecord(GridE);
+}
+
+//-------------------------------------
+// Работа с Записями
+// Добавление записи
+function AddRecord(grid, data) {
+	var store = grid.getStore(), 
+		record = new store.model(data);
+	store.add(record);
+	store.sync({
+		success: function(batch, options){
+			console.log('AddRecord success', batch, options);
+			onDataModifed(true);
+			//store.load();
+		},
+		failure: function(batch, options){
+			store.rejectChanges(); //store.add(store.getRemovedRecords());
+			console.log('AddRecord failure', batch, options);
+		},  				
+	});
+}
+
+// Редактирование записи
+function EditRecord(grid, data) {
+	var store   = grid.getStore(),
+	    record  = grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		record.set(data);
+		store.sync({
+			success: function(batch, options){
+				console.log('EditRecord success', batch, options);
+				onDataModifed(true);
+				//store.load();
+			},
+			failure: function(batch, options){
+				store.rejectChanges(); //store.add(store.getRemovedRecords());
+				console.log('EditRecord failure', batch, options);
+			},  				
+		});
+	}
+}
+
+// Удаление записи
+function DeleteRecord(grid) {
+	var store   = grid.getStore(),
+	    record  = grid.getSelectionModel().getSelection()[0];//.selected.items[0];
+    if (record) {
+		var msg = Ext.MessageBox.show({
+			title:'Удаление',
+            buttons: Ext.MessageBox.YESNO,
+            icon: Ext.MessageBox.QUESTION,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+            msg: 'Удалить запись "'+record.data.name+'"?',
+            fn: function(btn) {
+                if (btn == 'yes') {
+				store.remove(record);
+				store.sync({
+					success: function(batch, options){
+						console.log('DeleteRecord success', batch, options);
+						onDataModifed(true);
+					},
+					failure: function(batch, options){
+						//store.add(store.getRemovedRecords());
+						store.rejectChanges();
+						console.log('DeleteRecord failure', batch, options);
+					},  				
+				});
+			}
+		},});
+		msg.alignTo(ThisWin, 'c-c'); //По центру окна
+	}
+}
+
+
+//============================================================================================================================
+//============================================================================================================================
+//             #     #  #  #    #        #######  #        #######  #     #  #######  #    #  #######   ######   
+//             #     #  #  ##   #        #        #        #        ##   ##  #        ##   #     #     #         
+//             #     #  #  # #  #        ####     #        ####     # # # #  ####     # #  #     #      #####    
+//             #  #  #  #  #  # #        #        #        #        #  #  #  #        #  # #     #           #   
+//              ## ##   #  #   ##        #######  #######  #######  #     #  #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+//===================================================================================
+//--------------------------- EDIT PROPERY FORM -------------------------------------
+// Create the combo box, attached to the states data store
+/*
+var TypeComboBox = ThisWin.Elements.TypeComboBox = Ext.create('Ext.form.ComboBox', {
+    name: 'type',
+	fieldLabel: 'Type',
+    store: [[false,"false"],[true,"true"]],
+    queryMode: 'local',
+	editable: false,
+	value: false
+});
+*/
+
+var FormP = ThisWin.Elements.FormP = Ext.create('Ext.form.Panel', {
+    //frame: true,
+    border:false,
+	width: 340,
+    bodyPadding: 5,
+    fieldDefaults: {
+        labelAlign: 'left',
+        labelWidth: 90,
+        anchor: '100%'
+    },
+    items: [
+		{
+			xtype: 'textfield',
+			name: 'name',
+			fieldLabel: 'Name',
+			value: '',
+			allowBlank: false,
+		},{
+			xtype: 'textfield',
+			name: 'type',
+			fieldLabel: 'Type',
+			value: ''
+		},
+	],
+	buttons: [{
+        text: 'Save',
+        handler: function() {
+			var form = this.up('form').getForm();
+            if (form.isValid()) {
+				if (this.up('form').Action == 'new') {
+					AddRecord(GridP, form.getValues());
+				} else {
+					EditRecord(GridP, form.getValues());
+				}
+				
+				form.reset();
+				EditPWindow.hide();
+			}
+        }
+    },{
+        text: 'Cancel',
+        handler: function() {
+            var form = this.up('form').getForm();
+			form.reset();
+			EditPWindow.hide();
+        }
+    }]
+});
+
+//--------------------------- EDIT PROPERY WINDOW --------------------------
+var EditPWindow = ThisWin.Elements.EditPWindow = Ext.create('Ext.Window', {
+    title: 'Propirties',
+    width: 340,
+	height: 120,
+	modal: true,
+    layout: 'fit',
+    items: [FormP],
+	closable: false,
+});
+	
+	
+	
+	
+//===================================================================================
+//--------------------------- EDIT PROPERY FORM -------------------------------------
+// Create the combo box, attached to the states data store
+/*
+var TypeComboBox = ThisWin.Elements.TypeComboBox = Ext.create('Ext.form.ComboBox', {
+    name: 'type',
+	fieldLabel: 'Type',
+    store: [[false,"false"],[true,"true"]],
+    queryMode: 'local',
+	editable: false,
+	value: false
+});
+*/
+
+var FormE = ThisWin.Elements.FormE = Ext.create('Ext.form.Panel', {
+    //frame: true,
+    border:false,
+	width: 340,
+    bodyPadding: 5,
+    fieldDefaults: {
+        labelAlign: 'left',
+        labelWidth: 90,
+        anchor: '100%'
+    },
+    items: [
+		{
+			xtype: 'textfield',
+			name: 'name',
+			fieldLabel: 'Name',
+			value: '',
+			allowBlank: false,
+		},{
+			xtype: 'textfield',
+			name: 'params',
+			fieldLabel: 'Params',
+			value: ''
+		},
+	],
+	buttons: [{
+        text: 'Save',
+        handler: function() {
+			var form = this.up('form').getForm();
+            if (form.isValid()) {
+				if (this.up('form').Action == 'new') {
+					AddRecord(GridE, form.getValues());
+				} else {
+					EditRecord(GridE, form.getValues());
+				}
+				
+				form.reset();
+				EditEWindow.hide();
+			}
+        }
+    },{
+        text: 'Cancel',
+        handler: function() {
+            var form = this.up('form').getForm();
+			form.reset();
+			EditEWindow.hide();
+        }
+    }]
+});
+
+//--------------------------- EDIT PROPERY WINDOW --------------------------
+var EditEWindow = ThisWin.Elements.EditEWindow = Ext.create('Ext.Window', {
+    title: 'Event',
+    width: 340,
+	height: 120,
+	modal: true,
+    layout: 'fit',
+    items: [FormE],
+	closable: false,
+});
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+//===================================================================================	
+//------------------------------------- OPTIONS FORM --------------------------------	
+
+var editName = ThisWin.Elements.editName = Ext.create('Ext.form.field.Text', {
+	name: 'name',
+    fieldLabel: 'Name',
+    value: '',
+	allowBlank: false,
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editClass = ThisWin.Elements.editClass = Ext.create('Ext.form.field.Text', {
+	name: 'class',
+    fieldLabel: 'Class',
+    value: '',
+	allowBlank: false,
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+//var editIcon = ThisWin.Elements.editIcon = Ext.create('Ext.form.field.Text', {
+//	name: 'config.icon',
+//    fieldLabel: 'Icon',
+//    value: '',
+//});
+
+var editTip = ThisWin.Elements.editTip = Ext.create('Ext.form.field.Text', {
+	name: 'config.tip',
+    fieldLabel: 'Tip',
+    value: '',
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editDescription = ThisWin.Elements.editDescription = Ext.create('Ext.form.field.Text', {
+	name: 'config.description',
+    fieldLabel: 'Description',
+    value: '',
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editExt = ThisWin.Elements.editExt = Ext.create('Ext.form.field.Text', {
+	name: 'ext',
+    fieldLabel: 'Ext',
+    value: '',
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editUrl = ThisWin.Elements.editUrl = Ext.create('Ext.form.field.Text', {
+	name: 'url',
+    fieldLabel: 'Url',
+    value: '',
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var editFuncname = ThisWin.Elements.editFuncname = Ext.create('Ext.form.field.Text', {
+	name: 'funcname',
+    fieldLabel: 'funcname',
+    value: '{NAME}_{EVENT}',
+	listeners:{
+		change: function(){onDataModifed(true);}
+	}
+});
+
+var formOptions = ThisWin.Elements.formOptions = Ext.create('Ext.form.Panel', {
+    //frame: true,
+    //border:false,
+	//title: 'Options',
+	//icon: 'images/ico/view16.png',
+	width: 340,
+    bodyPadding: 5,
+    fieldDefaults: {
+        labelAlign: 'left',
+        labelWidth: 90,
+        anchor: '100%'
+    },
+    items: [editName,editClass,/*editIcon,*/editTip,editDescription,editExt,editUrl,editFuncname],
+});
+
+
+
+
+
+
+//===================================================================================	
+//------------------------------ ToolProperties -------------------------------------
+var ToolButtonPropertiesAdd    = ThisWin.Elements.ToolButtonPropertiesAdd    = Ext.create('Ext.Button', {text: 'Add',    icon: 'images/ico/add16.png',  disabled: false,  listeners: {click: onPropertiesAdd,},});
+var ToolButtonPropertiesEdit   = ThisWin.Elements.ToolButtonPropertiesEdit   = Ext.create('Ext.Button', {text: 'Edit',   icon: 'images/ico/edit16.png',   disabled: true,  listeners: {click: onPropertiesEdit,},});
+var ToolButtonPropertiesDelete = ThisWin.Elements.ToolButtonPropertiesDelete = Ext.create('Ext.Button', {text: 'Delete', icon: 'images/ico/delete16.png', disabled: true,  listeners: {click: onPropertiesDelete,},});
+
+var ToolbarProperties = ThisWin.Elements.ToolbarProperties = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [ToolButtonPropertiesAdd, ToolButtonPropertiesEdit, ToolButtonPropertiesDelete],
+});
+//===================================================================================	
+//----------------------------------- StoreP ----------------------------------------
+var StoreP = ThisWin.Elements.StoreP = Ext.create('Ext.data.Store',{
+	lastid: 0,
+	fields:  [
+		{name: 'name',   type: 'string'	},
+		{name: 'type',   type: 'string'	},
+	],
+	autoLoad: false,
+});
+//===================================================================================	
+//---------------------------------- GridP ------------------------------------------
+var GridP = ThisWin.Elements.GridP = Ext.create('Ext.grid.Panel', {
+	border:false,
+	tbar:[ToolbarProperties],
+	store: StoreP,
+	columns: [
+			{ text: 'id', 		dataIndex: 'id'	, hidden: true},
+			{
+				width: 30,
+				renderer: function(v, cellValues, rec) {
+					return '<a href="'+editUrl.getValue()+'-cfg-' + rec.get('name')+'" target="blank"><img src="images/ico/info16.png"></img></a>';
+				},
+			},
+			{ text: 'name',	 dataIndex: 'name', flex:1},
+			{ text: 'type',	 dataIndex: 'type',},
+		
+	],
+	listeners: {
+			celldblclick:    onPropertiesEdit,
+			selectionchange: onGridPSelectionChange,
+			cellkeydown: function( obj, td, cellIndex, record, tr, rowIndex, e, eOpts ){
+				if (e.keyCode === 45) {onPropertiesAdd();}
+				if (e.keyCode === 13) {onPropertiesEdit();}
+				if (e.keyCode === 46) {onPropertiesDelete();}
+            },
+	},
+});
+
+
+
+
+
+
+
+
+//===================================================================================	
+//---------------------------------- ToolEvents -------------------------------------
+var ToolButtonEventsAdd    = ThisWin.Elements.ToolButtonEventsAdd    = Ext.create('Ext.Button', {text: 'Add',    icon: 'images/ico/add16.png',    disabled: false,  listeners: {click: onEventsAdd,},});
+var ToolButtonEventsEdit   = ThisWin.Elements.ToolButtonEventsEdit   = Ext.create('Ext.Button', {text: 'Edit',   icon: 'images/ico/edit16.png',   disabled: true,   listeners: {click: onEventsEdit,},});
+var ToolButtonEventsDelete = ThisWin.Elements.ToolButtonEventsDelete = Ext.create('Ext.Button', {text: 'Delete', icon: 'images/ico/delete16.png', disabled: true,   listeners: {click: onEventsDelete,},});
+
+var ToolbarEvents = ThisWin.Elements.ToolbarEvents = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [ToolButtonEventsAdd, ToolButtonEventsEdit, ToolButtonEventsDelete],
+});
+//===================================================================================	
+//----------------------------------- StoreE ----------------------------------------
+var StoreE = ThisWin.Elements.StoreE = Ext.create('Ext.data.Store',{
+	lastid: 0,
+	autoLoad: false,
+	fields:  [
+		{name: 'name',     type: 'string' },
+		{name: 'params',   type: 'string' },
+	],
+});
+//===================================================================================	
+//---------------------------------- GridE ------------------------------------------
+var GridE = ThisWin.Elements.GridE = Ext.create('Ext.grid.Panel', {
+	border:false,
+	tbar:[ToolbarEvents],
+	store: StoreE,
+	columns: [
+		{ text: 'id', 		dataIndex: 'id'	, hidden: true},
+		{
+			width: 30,
+			renderer: function(v, cellValues, rec) {
+				return '<a href="'+editUrl.getValue()+'-event-' + rec.get('name')+'" target="blank"><img src="images/ico/info16.png"></img></a>';
+			},
+		},
+		{ text: 'Name',		dataIndex: 'name', flex:1},
+		{ text: 'Params',	dataIndex: 'params',},
+	],
+	listeners: {
+		celldblclick: onEventsEdit,
+		selectionchange: onGridESelectionChange,
+		cellkeydown: function( obj, td, cellIndex, record, tr, rowIndex, e, eOpts ){
+			if (e.keyCode === 45) {onEventsAdd();}
+			if (e.keyCode === 13) {onEventsEdit();}
+			if (e.keyCode === 46) {onEventsDelete();}
+        },
+	},
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//===================================================================================	
+//---------------------------- TAB OPTIONS ------------------------------------------
+var TabPanelTabOptions = ThisWin.Elements.TabPanelTabOptions = Ext.create('Ext.panel.Panel', {
+    title: 'Options',
+	icon: 'images/ico/view16.png',
+	layout: 'fit',
+	border: false,
+	items: [formOptions],	
+});
+
+//===================================================================================	
+//---------------------------- TAB Properties ---------------------------------------
+var TabPanelTabProperties = ThisWin.Elements.TabPanelTabProperties = Ext.create('Ext.panel.Panel', {
+    title: 'Properties',
+	icon: 'images/ico/view16.png',
+	layout: 'fit',
+	border: false,
+	items: [GridP],	
+});
+
+//===================================================================================	
+//----------------------------- TAB Events ------------------------------------------
+var TabPanelTabEvents = ThisWin.Elements.TabPanelTabEvents = Ext.create('Ext.panel.Panel', {
+    title: 'Events',
+	icon: 'images/ico/view16.png',
+	layout: 'fit',
+	border: false,
+	items: [GridE],	
+});
+
+
+//===================================================================================	
+//-------------------------- TAB Constructor ----------------------------------------   
+/*
+var ToolButtonCompile  = ThisWin.Elements.ToolButtonCompile = Ext.create('Ext.Button', {text: 'Compile',  icon: 'images/ico/compress16.png', listeners: {click: onCompile,},});
+
+var ToolbarConst = ThisWin.Elements.ToolbarConst = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [ToolButtonCompile],
+});
+*/
+var TextAreaConstructor = ThisWin.Elements.TextAreaConstructor = Ext.create('App.components.aceeditor.WithToolbar', {
+    //theme: 'eclipse',
+    parser: 'javascript',
+    printMargin: true
+});
+
+var TabPanelTabConstructor = ThisWin.Elements.TabPanelTabConstructor = Ext.create('Ext.panel.Panel', {
+    icon: 'images/ico/script16.png',
+	title: 'Constructor',
+	border: false,
+	layout: 'fit',
+	//tbar:[ToolbarConst],
+	items: [TextAreaConstructor],	
+});
+
+
+//===================================================================================	
+//-------------------------------- TAB DOCS -----------------------------------------
+var ToolButtonOpenDocs  = ThisWin.Elements.ToolButtonOpenDocs = Ext.create('Ext.Button', {text: 'Load',  icon: 'images/ico/folder16.png', listeners: {click: onOpenDocs,},});
+var ToolButtonSyncDocs  = ThisWin.Elements.ToolButtonSyncDocs = Ext.create('Ext.Button', {text: 'Sync',  icon: 'images/ico/folder16.png', listeners: {click: onSyncDocs,},});
+
+var ToolbarDocs = ThisWin.Elements.ToolbarDocs = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [ToolButtonOpenDocs, ToolButtonSyncDocs],
+});
+
+var TextAreaDocs = ThisWin.Elements.TextAreaDocs = Ext.create('App.components.aceeditor.WithToolbar', {
+    //theme: 'eclipse',
+    parser: 'json',
+    //showInvisible: true,
+    printMargin: true,
+	sourceCode: 'http://docs.sencha.com/extjs/4.2.3/output/%NAME%.js',
+});
+
+var TabPanelTabDocs = ThisWin.Elements.TabPanelTabDocs = Ext.create('Ext.panel.Panel', {
+    title: 'Import From DOCS',
+	border: false,
+	layout: 'fit',
+	tbar:[ToolbarDocs],
+	items: [TextAreaDocs],	
+});
+
+/*
+//===================================================================================	
+//--------------------------------- TAB RAW -----------------------------------------
+var TextAreaRaw = ThisWin.Elements.TextAreaRaw = Ext.create('App.components.aceeditor.WithToolbar', {
+    //theme: 'eclipse',
+    parser: 'javascript',
+    printMargin: true,
+});
+
+var TabPanelTabRaw = ThisWin.Elements.TabPanelTabRaw = Ext.create('Ext.panel.Panel', {
+    icon: 'images/ico/compress16.png',
+	title: 'RAW',
+	border: false,
+	layout: 'fit',
+	items: [TextAreaRaw],	
+});
+*/
+
+//===================================================================================	
+//----------------------------------- TABS ------------------------------------------
+var TabPanel = ThisWin.Elements.TabPanel = Ext.create('Ext.tab.Panel', {
+	activeTab: 0,
+	//border: false,
+    items: [
+		TabPanelTabOptions,
+		TabPanelTabProperties,
+		TabPanelTabEvents,
+		TabPanelTabConstructor,
+		//TabPanelTabRaw,
+		TabPanelTabDocs
+    ],
+});
+
+
+//===================================================================================	
+//----------------------------- MAIN TOOLBAR ----------------------------------------	
+var ToolButtonLoad   = ThisWin.Elements.ToolButtonLoad  = Ext.create('Ext.Button', {text: 'Load',  icon: 'images/ico/folder16.png',  disabled: false,  listeners: {click: onLoad,},});
+var ToolButtonSave   = ThisWin.Elements.ToolButtonSave  = Ext.create('Ext.Button', {text: 'Save',  icon: 'images/ico/save16.png',    disabled: false,  listeners: {click: onSave,},});
+/*var ToolButtonComp   = ThisWin.Elements.ToolButtonSave  = Ext.create('Ext.Button', {text: 'Compile',  icon: 'images/ico/compress16.png',    disabled: false,  listeners: {click: onCompile,},});*/
+
+var Toolbar = ThisWin.Elements.Toolbar = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [ToolButtonLoad, ToolButtonSave, /*ToolButtonComp*/],
+});
+
+//===================================================================================	
+//----------------------------- MAIN PANEL ------------------------------------------
+var Panel = ThisWin.Elements.Panel = Ext.create('Ext.panel.Panel', {
+	layout: 'fit',
+	border: false,
+	//tbar:[Toolbar],
+	items:[TabPanel],
+	buttons: [
+	/*{
+        text: 'Save',
+        handler: function() {
+			onSave(false);
+        }
+    },*/{
+        text: 'OK',
+        handler: function() {
+			onSave(true);
+        }
+    },{
+        text: 'Cancel',
+        handler: function() {
+			ThisWin.close();
+        }
+    }],
+});
+
+ThisWin.add(Panel);	
+ThisWin.on('beforeclose', onBeforeClose);
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+
+timerContentTimeOut.destroy();
+if (typeof(onWinCreate)==='function') {onWinCreate(ThisWin);}
+ThisWin.doLayout();

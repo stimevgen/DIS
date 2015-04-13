@@ -1,0 +1,293 @@
+var ThisWin = App.Window.getWinById("%ContainerId%");	
+if (!ThisWin){
+	Ext.Msg.alert({
+		title:'Ошибка окна!',
+		msg: 'Не найдено окно "%ContainerId%" для отображения контента.',
+		icon: Ext.MessageBox.WARNING,
+		buttons: Ext.Msg.OK,
+		modal: true,
+	});
+	return;
+}
+
+var Timers = new Ext.util.TaskRunner();
+// Защитный Timer не активности окна
+var timerContentTimeOut = Timers.newTask({
+	run: function () {
+		Ext.Msg.alert({
+			title:'Ошибка окна!',
+			msg: 'Окно "'+ThisWin.name+' ['+ThisWin.id+']" не отвечает.',
+			icon: Ext.MessageBox.WARNING,    // иконка мб {ERROR,INFO,QUESTION,WARNING}
+			buttons: Ext.Msg.OK,
+			modal: true,
+			fn: function(btn) {
+				if (ThisWin) {ThisWin.close();}
+				timerContentTimeOut.destroy();
+			}
+		});
+	},
+	interval: 5000
+});
+timerContentTimeOut.start();
+
+ThisWin.Elements = {};
+ThisWin.Public   = {};
+
+
+//============================================================================================================================
+//============================================================================================================================
+//                               #######  #     #  #######  #    #  #######   ######   
+//                               #        #     #  #        ##   #     #     #         
+//                               ####      #   #   ####     # #  #     #      #####    
+//                               #          # #    #        #  # #     #           #   
+//                               #######     #     #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+var EditWin = 'SysDesignerWindowEditor';
+
+function onWinCreate(obj) {
+	obj.setTitle('Система: Интерфейсы');
+	obj.setIcon('images/ico/table16.png');
+	if (obj.height < 300) {obj.height = 300;}
+	if (obj.width  < 600) {obj.width  = 600;}
+}
+
+
+function onGridCellDblClick( obj, td, cellIndex, record, tr, rowIndex, e, eOpts ) {
+	//console.log('onGridCellDblClick', record.data);
+}
+
+function roSelectRecord(){
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		return record.data.ro;
+	} else {
+		return true;
+	}
+}
+
+function onGridSelectionChange( obj, selected, eOpts ) {
+	ToolButtonCopy.setDisabled(selected.length === 0);
+	ToolButtonEdit.setDisabled(selected.length === 0);
+	ToolButtonDelete.setDisabled(selected.length === 0 || roSelectRecord());
+}
+
+function onStoreRefresh(obj, eOpts){
+	//console.log('onStoreRefresh', obj);
+}
+
+// DB function Grid
+function OpenEditWindow(uniq, data){
+	App.Window.LoadServerWin(EditWin, EditWin+'_'+uniq, ThisWin, {dataParent:data});
+}
+
+function onGridAdd(obj, e, eOpts){
+	OpenEditWindow( 'new', {
+		action:		'add',
+		record:		new Store.model({name:'New'}),
+		recordFn:	RecordAdd,
+	});
+}
+
+function onGridCopy(obj, e, eOpts){
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		OpenEditWindow( 'new', {
+			action:		'copy',
+			record:		record,
+			recordFn:	RecordAdd,
+		});
+	}
+}
+
+function onGridEdit(obj, e, eOpts){
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		OpenEditWindow( record.data.id, {
+			action:		'edit',
+			record:		record,
+			recordFn:	RecordEdit,
+		});
+	}
+}
+
+function onGridDelete(obj, e, eOpts){
+	var record  = Grid.getSelectionModel().getSelection()[0];
+    if (record) {
+		var msg = Ext.MessageBox.show({
+			title:'Удаление',
+			buttons: Ext.MessageBox.YESNO,
+			icon: Ext.MessageBox.QUESTION,
+			msg: 'Удалить запись "'+record.data.name+'"?',
+			fn: function(btn) {
+				if (btn == 'yes') {RecordDelete(record);}
+			},
+		});
+		msg.alignTo(ThisWin, 'c-c');
+	}
+}
+
+function onGridComponents(obj, e, eOpts){
+	App.Window.LoadServerWin('SysDesignerComponents');
+}
+
+/* ADD */
+function RecordAdd(record, ok, err){
+	Store.add(new Store.model(record));
+	Store.sync({
+		success: function(batch, options){
+			Store.load();
+			if (typeof ok === 'function') {ok(batch, options);}
+		},
+		failure: function(batch, options){
+			Store.rejectChanges();
+			if (typeof err === 'function') {err(batch, options);}
+		},  				
+	});	
+}
+
+/* EDIT */
+function RecordEdit(record, ok, err){
+	record.save({
+		success: function(batch, options){
+			Store.load();
+			if (typeof ok === 'function') {ok(batch, options);}
+		},
+		failure: function(batch, options){
+			Store.rejectChanges();
+			if (typeof err === 'function') {err(batch, options);}			
+		},
+	});	
+}
+
+/* DELETE */
+function RecordDelete(record, ok, err){
+	Store.remove(record);
+	Store.sync({
+		success: function(batch, options){
+			Store.load();
+			if (typeof ok === 'function') {ok(batch, options);}
+		},
+		failure: function(batch, options){
+			Store.add(Store.getRemovedRecords());
+			Store.rejectChanges();
+			if (typeof err === 'function') {err(batch, options);}
+		},  				
+	});	
+}
+//============================================================================================================================
+//============================================================================================================================
+//             #     #  #  #    #        #######  #        #######  #     #  #######  #    #  #######   ######   
+//             #     #  #  ##   #        #        #        #        ##   ##  #        ##   #     #     #         
+//             #     #  #  # #  #        ####     #        ####     # # # #  ####     # #  #     #      #####    
+//             #  #  #  #  #  # #        #        #        #        #  #  #  #        #  # #     #           #   
+//              ## ##   #  #   ##        #######  #######  #######  #     #  #######  #   ##     #     ######    
+//============================================================================================================================
+//============================================================================================================================
+
+//----------------------------------------
+//            ELEMENT Store
+//----------------------------------------
+var Store = ThisWin.Elements.Store = App.Designer.WindowStore;
+		
+//----------------------------------------
+//            ELEMENT Grid
+//----------------------------------------
+var Grid = ThisWin.Elements.Grid = Ext.create('App.components.data.Grid', {
+	conf:{
+		store: Store,
+		columns: [
+			{ text: 'Id', 		dataIndex: 'id'	, hidden: true},
+			{ text: 'Guid',		dataIndex: 'guid',  hidden: true},
+			{ text: 'System', 	dataIndex: 'system_guid',
+				renderer: function(value) {
+					var system = App.Designer.SystemStore.findRecord('guid', value);
+					if (system) {
+						return '<img src="images/ico/workflow16.png"></img> '+system.data.title;
+					} else {
+						return '<font style="color:#808080"><i>{...}</i></font>';
+					}
+				},
+			},{
+				text: 'Title',
+				flex: 1,
+				dataIndex: 'title',
+				renderer: function(value, metaData, record) {
+					return  record.data.ro ? '<img src="images/ico/16/lock.png"></img> '+value : '<img src="images/ico/table16.png"></img> '+value;
+				},
+			},{
+				xtype: 'actioncolumn',
+				width: 24,
+				items: [{
+					icon: 'images/ico/16/control_play_blue.png',
+					handler: function (grid, rowIndex, colIndex) {
+						var rec = grid.getStore().getAt(rowIndex);
+						App.Window.LoadDbWin(rec.get('name'));
+					}
+            }]},
+			{ text: 'Name',		dataIndex: 'name',  flex:1},
+			{ text: 'Config',	dataIndex: 'config',  hidden: true},
+			{ text: 'Data',		dataIndex: 'data',    hidden: true},
+		],
+		/*features: [Ext.create('Ext.grid.feature.Grouping', {
+				groupHeaderTpl: Ext.create('Ext.XTemplate',
+					'<img src="images/ico/workflow16.png"></img> {name:this.formatName} ({rows.length})',
+					{
+						formatName: function(guid) {
+							var system = App.Designer.SystemStore.findRecord('guid', guid);
+							if (system) {
+								return system.data.title;
+							} else {
+								return '<font style="color:#808080"><i>{...}</i></font>';
+							}
+						}
+					}
+				)				
+		})],*/
+		listeners: {
+			celldblclick:    onGridEdit,
+			selectionchange: onGridSelectionChange,
+			cellkeydown: function( obj, td, cellIndex, record, tr, rowIndex, e, eOpts ){
+				if (e.keyCode === 45) {onGridAdd();}
+				if (e.keyCode === 13) {onGridEdit();}
+				if (e.keyCode === 46) {if (!roSelectRecord()) {onGridDelete();}}
+			},
+			afterlayout: function(){ToolButtonDelete.setDisabled(roSelectRecord());},
+		},
+	}
+});
+
+//----------------------------------------
+//            ELEMENT ToolbarButton
+//----------------------------------------
+var ToolButtonAdd    = ThisWin.Elements.ToolButtonAdd    = Ext.create('Ext.Button', {text: 'Add'	,  icon: 'images/ico/add16.png',    disabled: false, listeners: {click: onGridAdd,},});
+var ToolButtonCopy   = ThisWin.Elements.ToolButtonCopy   = Ext.create('Ext.Button', {text: 'Copy'	,  icon: 'images/ico/copy16.png',   disabled: true,  listeners: {click: onGridCopy,},});
+var ToolButtonEdit   = ThisWin.Elements.ToolButtonEdit   = Ext.create('Ext.Button', {text: 'Edit'	,  icon: 'images/ico/edit16.png',   disabled: true,  listeners: {click: onGridEdit,},});
+var ToolButtonDelete = ThisWin.Elements.ToolButtonDelete = Ext.create('Ext.Button', {text: 'Delete' ,  icon: 'images/ico/delete16.png', disabled: true,  listeners: {click: onGridDelete,},});
+var ToolButtonComponents = ThisWin.Elements.ToolButtonComponents = Ext.create('Ext.Button', {text: 'Components' ,  icon: 'images/ico/puzzle16.png', disabled: false,  listeners: {click: onGridComponents,},});
+
+//----------------------------------------
+//            ELEMENT Toolbar
+//----------------------------------------
+var Toolbar = ThisWin.Elements.Toolbar1 = Ext.create('Ext.toolbar.Toolbar', {
+	border: false,
+	items: [ToolButtonAdd, ToolButtonCopy, ToolButtonEdit, ToolButtonDelete, ToolButtonComponents],
+});
+
+//----------------------------------------
+//            ELEMENT Panel
+//----------------------------------------
+var Panel = ThisWin.Elements.Panel = Ext.create('Ext.panel.Panel', {
+	layout: 'fit',
+	tbar:[Toolbar],
+	items:[Grid],
+});
+
+ThisWin.add(Panel);	
+
+//==========================================================================================================================================================================
+//==========================================================================================================================================================================
+timerContentTimeOut.destroy();
+if (typeof(onWinCreate)==='function') {onWinCreate(ThisWin);}
+ThisWin.doLayout();
